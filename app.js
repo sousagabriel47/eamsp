@@ -1,5 +1,6 @@
-var sb, me = null, prof = null, admin = false, P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', recovery = false;
+var sb, me = null, prof = null, admin = false, sup = false, USR = [], P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', recovery = false;
 var MES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+var PAP = {atleta:'Atleta', gestao:'Gestão', admin:'Administrador'};
 var RTL = {pendente:'Pendente', aprovada:'Aprovada', recusada:'Recusada', cancelada:'Cancelada'};
 var STL = {pendente:'Pendente', aprovado:'Aprovado', pago:'Pago', recusado:'Recusado', cancelado:'Cancelado'};
 function $(s){return document.querySelector(s)}
@@ -107,6 +108,21 @@ function viewRen(){
   });
   return h;
 }
+function viewUsr(){
+  return '<h2>Usuários e funções</h2><p class="sum">Atleta: usa os próprios dados. Gestão: valida renovações e reembolsos e cadastra provas. Administrador: tudo isso e atribui as funções. A pessoa precisa sair e entrar de novo para a nova função valer.</p><label style="margin-bottom:10px">Buscar por nome ou e-mail<input id="uq" autocomplete="off"></label><div id="ulist"></div>';
+}
+function usrList(){
+  var q = ($('#uq').value || '').trim().toLowerCase();
+  var l = USR.filter(function(u){return !q || (u.nome || '').toLowerCase().indexOf(q) >= 0 || (u.email || '').toLowerCase().indexOf(q) >= 0});
+  var h = '<p class="sum">' + l.length + ' usuário(s)' + (l.length > 100 ? ' (mostrando 100)' : '') + '</p>';
+  l.slice(0, 100).forEach(function(u){
+    h += '<div class="item"><div class="info"><b>' + esc(u.nome || 'Sem nome') + (u.id === me.id ? ' (você)' : '') + '</b><small>' + esc(u.email || 'sem e-mail') + '</small></div><select aria-label="Função de ' + esc(u.nome || 'usuário') + '">' +
+      ['atleta', 'gestao', 'admin'].map(function(p){return '<option value="' + p + '"' + (p === u.papel ? ' selected' : '') + '>' + PAP[p] + '</option>'}).join('') +
+      '</select><button class="btn s g" data-pp="' + esc(u.id) + '">Salvar</button></div>';
+  });
+  $('#ulist').innerHTML = h;
+}
+function initUsr(){ $('#uq').oninput = usrList; usrList(); }
 function viewReb(){
   var h = '<h2>' + (admin ? 'Solicitações de reembolso' : 'Meus reembolsos') + '</h2>';
   if (!admin) {
@@ -133,24 +149,26 @@ function viewReb(){
 async function refresh(){
   var pr = await sb.from('perfis').select('*').eq('id', me.id).single();
   if (pr.error) return fail(pr.error);
-  prof = pr.data; admin = prof.papel === 'gestao';
+  prof = pr.data; admin = prof.papel === 'gestao' || prof.papel === 'admin'; sup = prof.papel === 'admin';
   var a = await Promise.all([
     sb.from('provas').select('*').order('data'),
     sb.from('reembolsos').select('*, perfis(nome), provas(nome)').order('criado_em', {ascending: false}),
     admin ? sb.from('perfis').select('*').eq('papel', 'atleta') : Promise.resolve({data: []}),
-    sb.from('renovacoes').select('*, perfis(nome)').order('criado_em', {ascending: false})
+    sb.from('renovacoes').select('*, perfis(nome)').order('criado_em', {ascending: false}),
+    sup ? sb.from('perfis').select('*').order('nome') : Promise.resolve({data: []})
   ]);
   for (var i = 0; i < a.length; i++) if (a[i].error) return fail(a[i].error);
-  P = a[0].data; R = a[1].data; ATL = a[2].data; REN = a[3].data; render();
+  P = a[0].data; R = a[1].data; ATL = a[2].data; REN = a[3].data; USR = a[4].data; render();
 }
 function render(){
   var np = REN.filter(function(x){return x.status == 'pendente'}).length, nr = R.filter(function(x){return x.status == 'pendente'}).length;
-  var tabs = admin ? [['cal','Calendário'],['ath','Atletas'],['ren','Renovações' + (np ? ' (' + np + ')' : '')],['reb','Reembolsos' + (nr ? ' (' + nr + ')' : '')]] : [['cal','Calendário'],['me','Meus dados'],['reb','Reembolsos']];
+  var tabs = admin ? [['cal','Calendário'],['ath','Atletas'],['ren','Renovações' + (np ? ' (' + np + ')' : '')],['reb','Reembolsos' + (nr ? ' (' + nr + ')' : '')]].concat(sup ? [['usr','Usuários']] : []) : [['cal','Calendário'],['me','Meus dados'],['reb','Reembolsos']];
   if (!tabs.some(function(t){return t[0] == tab})) tab = 'cal';
   $('#nav').innerHTML = tabs.map(function(t){return '<button data-t="' + t[0] + '"' + (t[0] == tab ? ' class="on"' : '') + '>' + t[1] + '</button>'}).join('');
-  $('#role').textContent = (admin ? 'Acesso de gestão' : 'Acesso de atleta') + (prof.nome ? ' · ' + prof.nome : '');
+  $('#role').textContent = (sup ? 'Acesso de administrador' : admin ? 'Acesso de gestão' : 'Acesso de atleta') + (prof.nome ? ' · ' + prof.nome : '');
   $('#out').hidden = false;
-  $('#app').innerHTML = ({cal: viewCal, ath: viewAth, me: viewMine, ren: viewRen, reb: viewReb})[tab]();
+  $('#app').innerHTML = ({cal: viewCal, ath: viewAth, me: viewMine, ren: viewRen, reb: viewReb, usr: viewUsr})[tab]();
+  if (tab == 'usr') initUsr();
   var f = $('#f');
   if (f) f.onsubmit = async function(e){
     e.preventDefault(); var d = new FormData(f), r;
@@ -181,6 +199,13 @@ document.addEventListener('click', async function(e){
     if (p[0] === 'recusado') { u.motivo_decisao = (prompt('Motivo da recusa (obrigatório):') || '').trim(); if (!u.motivo_decisao) return; }
     else if (p[0] === 'aprovado' && !confirm('Aprovar este reembolso?')) return;
     r = await sb.from('reembolsos').update(u).eq('id', p[1]);
+  }
+  else if (b.dataset.pp) {
+    var sel = b.closest('.item').querySelector('select'), alvo = USR.filter(function(u){return u.id === b.dataset.pp})[0];
+    if (!alvo || sel.value === alvo.papel) return;
+    var txt = 'Mudar a função de ' + (alvo.nome || alvo.email) + ' para ' + PAP[sel.value] + '?' + (sel.value === 'admin' ? ' Administradores podem atribuir funções a qualquer usuário.' : '') + (alvo.id === me.id ? ' Atenção: é a sua própria função.' : '');
+    if (!confirm(txt)) return;
+    r = await sb.rpc('definir_papel', {alvo: b.dataset.pp, novo: sel.value});
   }
   else if (b.dataset.rn) {
     var q = b.dataset.rn.split('|'), w = {status: q[0]};

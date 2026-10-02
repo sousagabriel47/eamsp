@@ -9,8 +9,14 @@ Site estático (HTML + JavaScript) publicado no GitHub Pages. Os dados ficam no 
 4. **Pages:** em *Settings > Pages*, escolha *Deploy from a branch*, branch `main`, pasta `/ (root)`. O endereço será `https://USUARIO.github.io/eamsp/`.
 5. **Login:** no Supabase, em *Authentication > URL Configuration*, coloque o endereço do passo 4 (com a barra final) em *Site URL* e também em *Redirect URLs*. Sem isso, a confirmação de e-mail e a recuperação de senha não funcionam.
 6. **Primeira gestão:** cadastre-se no site e, no SQL Editor, rode (trocando o e-mail):
-   `update public.perfis set papel = 'gestao' where id = (select id from auth.users where email = 'gestao@exemplo.com');`
+   `update public.perfis set papel = 'admin' where id = (select id from auth.users where email = 'admin@exemplo.com');`
 7. **Teste de permissões:** com duas contas de atleta e uma de gestão, siga o roteiro do fim do `schema.sql`.
+
+## Níveis de acesso
+- **Atleta:** vê o calendário, atualiza o nome, solicita renovações e reembolsos e acompanha as decisões.
+- **Gestão:** tudo do atleta, mais cadastrar provas, ver os atletas e validar renovações e reembolsos.
+- **Admin:** tudo da gestão, mais a aba **Usuários**, onde atribui a função de cada pessoa cadastrada. O banco impede que alguém mude a própria função sem ser admin e que o último admin seja rebaixado; cada mudança fica registrada.
+- O primeiro admin é definido pelo SQL Editor (passo "Primeira gestão", agora com `'admin'`). Depois disso, as demais funções são dadas pela aba Usuários.
 
 ## Validação pela gestão
 - **Atestado e anuidade:** o atleta não altera as datas diretamente. Ele solicita a renovação (com a nova validade) e a data só passa a valer quando a gestão aprova. A recusa exige motivo, e só pode haver uma solicitação pendente por tipo.
