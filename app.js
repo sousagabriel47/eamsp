@@ -175,13 +175,13 @@ function showAuth(){
     e.preventDefault(); var d = new FormData(f), r; msg('Aguarde…');
     if (invite) {
       r = await sb.auth.updateUser({password: d.get('s'), data: {nome: d.get('n').trim()}});
-      if (r.error) return msg(r.error.message);
+      if (r.error) return msg(/session/i.test(r.error.message) ? 'O link do convite expirou ou já foi usado. Peça um novo convite à gestão.' : r.error.message);
       await sb.from('perfis').update({nome: d.get('n').trim()}).eq('id', me.id);
       invite = false; aviso = 'Acesso ativado. Bem-vindo(a) à EAMSP!'; boot(); return;
     }
     if (recovery) {
       r = await sb.auth.updateUser({password: d.get('s')});
-      if (r.error) return msg(r.error.message);
+      if (r.error) return msg(/session/i.test(r.error.message) ? 'O link de redefinição expirou ou já foi usado. Peça uma nova redefinição de senha.' : r.error.message);
       recovery = false; aviso = 'Senha alterada com sucesso.'; boot(); return;
     }
     if (authMode === 'in') {
@@ -420,10 +420,13 @@ function render(){
       if (sn1.length < 8) return msg('A nova senha precisa ter pelo menos 8 caracteres.');
       if (sn1 === sa) return msg('A nova senha deve ser diferente da atual.');
       msg('Aguarde…');
-      var ck = await sb.functions.invoke('entrar', {body: {email: me.email, senha: sa, verificar: true}});
+      // confere a senha atual (conta como tentativa) e recebe uma sessão nova para trocar a senha
+      var ck = await sb.functions.invoke('entrar', {body: {email: me.email, senha: sa}});
       if (ck.error) { var mm = await msgFuncao(ck.error); msg(mm); if (/bloquead/i.test(mm)) setTimeout(refresh, 2500); return; }
+      var ss2 = await sb.auth.setSession(ck.data.session);
+      if (ss2.error) return msg('Sua sessão expirou. Saia, entre de novo e repita a troca de senha.');
       var up = await sb.auth.updateUser({password: sn1});
-      if (up.error) return msg(up.error.message);
+      if (up.error) return msg(/session/i.test(up.error.message) ? 'Sua sessão expirou. Saia, entre de novo e repita a troca de senha.' : up.error.message);
       await sb.auth.signOut({scope: 'others'});
       f.reset(); msg('Senha alterada. Os outros aparelhos foram desconectados.');
       return;
