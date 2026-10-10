@@ -93,7 +93,7 @@ function validarCSV(m){
   });
   return {rows: rows, erros: erros};
 }
-var EXIGIR_ANEXO = false;          // true = o PDF passa a ser obrigatório em renovações e reembolsos
+var EXIGIR_ANEXO = true;          // true = o PDF passa a ser obrigatório em renovações e reembolsos
 var MAX_PDF = 5 * 1024 * 1024;     // 5 MB (o mesmo limite está no bucket do Supabase)
 async function validaPdf(f){
   if (!f || !f.size) return 'Arquivo vazio.';
@@ -210,7 +210,7 @@ function reembProva(p){
   var h = '<details style="flex-basis:100%"><summary style="cursor:pointer;color:var(--g);font-weight:600">' + Object.keys(ids).length + ' atleta(s) pediram reembolso · ' + money(tot) + '</summary>';
   rs.slice().sort(function(a, b){return ((a.perfis && a.perfis.nome) || '').localeCompare((b.perfis && b.perfis.nome) || '')}).forEach(function(r){
     var c = r.status == 'recusado' || r.status == 'cancelado' ? 'b' : r.status == 'pendente' ? 'w' : '';
-    h += '<div class="rw" style="display:flex;gap:8px;align-items:center;padding:4px 0;font-size:14px"><span style="flex:1">' + esc((r.perfis && r.perfis.nome) || 'Sem nome') + ' · ' + money(r.valor) + ' <small style="color:var(--mu)">' + esc(r.descricao) + '</small></span><span class="tag ' + c + '">' + STL[r.status] + '</span></div>';
+    h += '<div class="rw" style="display:flex;gap:8px;align-items:center;padding:4px 0;font-size:14px"><span style="flex:1">' + esc((r.perfis && r.perfis.nome) || 'Sem nome') + ' · ' + money(r.valor) + ' <small style="color:var(--mu)">' + esc(r.descricao) + '</small></span><span class="tag ' + c + '">' + STL[r.status] + '</span>' + pdfBtn(r) + '</div>';
   });
   return h + '</details>';
 }
