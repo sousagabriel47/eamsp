@@ -34,11 +34,11 @@ function lerCadastro(d, comAdesao){
   if (comAdesao) dados.data_adesao = ad || null;
   return {dados: dados};
 }
-function formCadastro(u, comAdesao){
+function formCadastro(u, comAdesao, semCancelar){
   return '<form id="f"><label>Nome<input name="n" required value="' + esc(u.nome) + '"></label><label>CPF<input name="cp" inputmode="numeric" placeholder="000.000.000-00" value="' + esc(fmtCpf(u.cpf)) + '"></label><label>Telefone (com DDD)<input name="tl" inputmode="tel" placeholder="(11) 90000-0000" value="' + esc(fmtTel(u.telefone)) + '"></label><label>Data de nascimento<input type="date" name="nc" max="' + today() + '" value="' + esc(u.data_nascimento || '') + '"></label>' +
     (comAdesao ? '<label>Data de adesão à equipe<input type="date" name="ad" max="' + today() + '" value="' + esc(u.data_adesao || '') + '"></label>'
                : '<label>Data de adesão à equipe<input readonly value="' + esc(u.data_adesao ? br(u.data_adesao) : 'Definida pela gestão') + '"></label>') +
-    '<button class="btn">Salvar</button>' + (comAdesao ? '<button type="button" class="btn x" data-edc="1">Cancelar</button>' : '') + '</form>';
+    '<button class="btn">Salvar</button>' + (comAdesao && !semCancelar ? '<button type="button" class="btn x" data-edc="1">Cancelar</button>' : '') + '</form>';
 }
 function baixar(nome, texto){
   var a = document.createElement('a');
@@ -93,7 +93,7 @@ function validarCSV(m){
   });
   return {rows: rows, erros: erros};
 }
-var EXIGIR_ANEXO = true;          // true = o PDF passa a ser obrigatório em renovações e reembolsos
+var EXIGIR_ANEXO = false;          // true = o PDF passa a ser obrigatório em renovações e reembolsos
 var MAX_PDF = 5 * 1024 * 1024;     // 5 MB (o mesmo limite está no bucket do Supabase)
 async function validaPdf(f){
   if (!f || !f.size) return 'Arquivo vazio.';
@@ -242,8 +242,7 @@ function viewAth(){
 }
 function viewMine(){
   var mine = REN.filter(function(x){return x.atleta_id === me.id});
-  var h = '<h2>Meus dados</h2>' + formCadastro(prof, false);
-  h += '<h2>Atestado e anuidade</h2><div class="item"><div class="info"><small>Atestado</small> ' + tag(st(prof.atestado_validade)) + '<br><small>Anuidade</small> ' + tag(st(prof.anuidade_ate)) + '</div></div>';
+  var h = '<h2>Atestado e anuidade</h2><div class="item"><div class="info"><small>Atestado</small> ' + tag(st(prof.atestado_validade)) + '<br><small>Anuidade</small> ' + tag(st(prof.anuidade_ate)) + '</div></div>';
   h += '<p class="sum">A nova validade só passa a valer depois que a gestão validar a solicitação.</p>';
   h += '<form id="f2"><label>O que renovar<select name="tp"><option value="atestado">Atestado</option><option value="anuidade">Anuidade</option></select></label><label>Nova validade<input type="date" name="v" required min="' + today() + '"></label><label>Comprovante em PDF (até 5 MB)<input type="file" name="a" accept="application/pdf,.pdf"' + (EXIGIR_ANEXO ? ' required' : '') + '></label><button class="btn">Solicitar renovação</button></form>';
   if (!mine.length) h += '<p class="empty">Nenhuma solicitação de renovação.</p>';
@@ -285,7 +284,9 @@ function usrList(){
 }
 function initUsr(){ $('#uq').oninput = usrList; usrList(); }
 function viewConta(){
-  return '<h2>Minha conta</h2><div class="item"><div class="info"><b>' + esc(prof.nome || 'Sem nome') + '</b><small>' + esc(me.email) + ' · ' + PAP[prof.papel] + ' · ' + STT[prof.status || 'ativo'] + '</small></div></div><h2>Alterar senha</h2><p class="sum">Use pelo menos 8 caracteres. Ao trocar a senha, os outros aparelhos conectados são desconectados.</p><form id="f" style="max-width:420px;grid-template-columns:1fr"><label>Senha atual<input type="password" name="sa" required autocomplete="current-password"></label><label>Nova senha<input type="password" name="sn" required minlength="8" autocomplete="new-password"></label><label>Repita a nova senha<input type="password" name="sr" required minlength="8" autocomplete="new-password"></label><button class="btn">Alterar senha</button><p id="msg" class="sum"></p></form>';
+  return '<h2>Minha conta</h2><div class="item"><div class="info"><b>' + esc(prof.nome || 'Sem nome') + '</b><small>' + esc(me.email) + ' · ' + PAP[prof.papel] + ' · ' + STT[prof.status || 'ativo'] + '</small></div></div>' +
+    '<h2>Meus dados cadastrais</h2><p class="sum">Mantenha nome, CPF, telefone e data de nascimento atualizados. A data de adesão à equipe é definida pela gestão.</p>' + formCadastro(prof, realAdmin, true) +
+    '<h2>Alterar senha</h2><p class="sum">Use pelo menos 8 caracteres. Ao trocar a senha, os outros aparelhos conectados são desconectados.</p><form id="f3" style="max-width:420px;grid-template-columns:1fr"><label>Senha atual<input type="password" name="sa" required autocomplete="current-password"></label><label>Nova senha<input type="password" name="sn" required minlength="8" autocomplete="new-password"></label><label>Repita a nova senha<input type="password" name="sr" required minlength="8" autocomplete="new-password"></label><button class="btn">Alterar senha</button><p id="msg" class="sum"></p></form>';
 }
 function viewSen(){
   var pend = SEN.filter(function(x){return x.status == 'pendente'}), done = SEN.filter(function(x){return x.status != 'pendente'}).slice(0, 15);
@@ -352,7 +353,7 @@ async function enviarLote(){
 function viewReb(){
   var h = '<h2>' + (admin ? 'Solicitações de reembolso' : 'Meus reembolsos') + '</h2>';
   if (eAtl) {
-    if (!prof.nome) h += '<p class="empty">Preencha seu nome em "Meus dados" antes de pedir reembolso.</p>';
+    if (!prof.nome) h += '<p class="empty">Preencha seu nome em "Minha conta" antes de pedir reembolso.</p>';
     else {
       h += '<form id="f"><label>Prova<select name="p"><option value="">Sem prova</option>' + opts(P, function(x){return x.nome}) + '</select></label><label>Descrição<input name="t" placeholder="Inscrição, transporte…" required></label><label>Valor (R$)<input type="number" name="v" step="0.01" min="0.01" required></label><label>Comprovante em PDF (até 5 MB)<input type="file" name="c" accept="application/pdf,.pdf"' + (EXIGIR_ANEXO ? ' required' : '') + '></label><button class="btn">Solicitar reembolso</button></form>';
     }
@@ -402,7 +403,7 @@ function render(){
   }
   var np = REN.filter(function(x){return x.status == 'pendente'}).length, nr = R.filter(function(x){return x.status == 'pendente'}).length;
   var ns = SEN.filter(function(x){return x.status == 'pendente'}).length;
-  var tabs = (admin ? [['cal','Calendário'],['ath','Atletas'],['ren','Renovações' + (np ? ' (' + np + ')' : '')],['reb','Reembolsos' + (nr ? ' (' + nr + ')' : '')]].concat(eAtl ? [['me','Meus dados']] : []).concat(sup ? [['usr','Usuários'],['sen','Senhas' + (ns ? ' (' + ns + ')' : '')],['imp','Importar CSV']] : []) : [['cal','Calendário'],['me','Meus dados'],['reb','Reembolsos']]).concat([['conta','Minha conta']]);
+  var tabs = (admin ? [['cal','Calendário'],['ath','Atletas'],['ren','Renovações' + (np ? ' (' + np + ')' : '')],['reb','Reembolsos' + (nr ? ' (' + nr + ')' : '')]].concat(eAtl ? [['me','Atestado e anuidade']] : []).concat(sup ? [['usr','Usuários'],['sen','Senhas' + (ns ? ' (' + ns + ')' : '')],['imp','Importar CSV']] : []) : [['cal','Calendário'],['me','Atestado e anuidade'],['reb','Reembolsos']]).concat([['conta','Minha conta']]);
   if (!tabs.some(function(t){return t[0] == tab})) tab = 'cal';
   $('#nav').innerHTML = tabs.map(function(t){return '<button data-t="' + t[0] + '"' + (t[0] == tab ? ' class="on"' : '') + '>' + t[1] + '</button>'}).join('');
   $('#role').textContent = (sim ? 'Simulando a visão de ' + (sim === 'gestao' ? 'gestão' : 'atleta') : realSup ? 'Acesso de administrador' : realAdmin ? 'Acesso de gestão' : 'Acesso de atleta') + (prof.nome ? ' · ' + prof.nome : '');
@@ -414,8 +415,26 @@ function render(){
   var f = $('#f');
   if (f) f.onsubmit = async function(e){
     e.preventDefault(); if (sim) return alert(MSGSIM); var d = new FormData(f), r;
-    if (tab == 'conta') {
-      var sa = d.get('sa'), sn1 = d.get('sn'), sr = d.get('sr');
+    if (tab == 'cal') r = await sb.from('provas').insert({nome: d.get('n'), data: d.get('d'), local: d.get('l'), distancia: d.get('k'), inscricao_ate: d.get('i') || null, link_inscricao: d.get('u') || null});
+    if (tab == 'ath' || tab == 'conta') {
+      var cd = lerCadastro(d, tab == 'ath' || realAdmin);
+      if (cd.erro) return alert(cd.erro);
+      r = await sb.from('perfis').update(cd.dados).eq('id', tab == 'ath' ? editId : me.id);
+      if (!r.error) { if (tab == 'ath') editId = ''; else aviso = 'Dados salvos.'; }
+    }
+    if (tab == 'reb') {
+      var an = await prepararAnexo(d.get('c'));
+      if (an.err) return alert(an.err);
+      r = await sb.from('reembolsos').insert({atleta_id: me.id, prova_id: d.get('p') || null, descricao: d.get('t'), valor: Number(d.get('v')), status: 'pendente', anexo_path: an.path});
+      if (r.error && an.path) await sb.storage.from('anexos').remove([an.path]);
+    }
+    if (r && r.error) return fail(r.error);
+    refresh();
+  };
+  var f3 = $('#f3');
+  if (f3) f3.onsubmit = async function(e){
+    e.preventDefault(); if (sim) return alert(MSGSIM); var d3 = new FormData(f3);
+      var sa = d3.get('sa'), sn1 = d3.get('sn'), sr = d3.get('sr');
       if (sn1 !== sr) return msg('As senhas novas não conferem.');
       if (sn1.length < 8) return msg('A nova senha precisa ter pelo menos 8 caracteres.');
       if (sn1 === sa) return msg('A nova senha deve ser diferente da atual.');
@@ -428,24 +447,8 @@ function render(){
       var up = await sb.auth.updateUser({password: sn1});
       if (up.error) return msg(/session/i.test(up.error.message) ? 'Sua sessão expirou. Saia, entre de novo e repita a troca de senha.' : up.error.message);
       await sb.auth.signOut({scope: 'others'});
-      f.reset(); msg('Senha alterada. Os outros aparelhos foram desconectados.');
+      f3.reset(); msg('Senha alterada. Os outros aparelhos foram desconectados.');
       return;
-    }
-    if (tab == 'cal') r = await sb.from('provas').insert({nome: d.get('n'), data: d.get('d'), local: d.get('l'), distancia: d.get('k'), inscricao_ate: d.get('i') || null, link_inscricao: d.get('u') || null});
-    if (tab == 'me' || tab == 'ath') {
-      var cd = lerCadastro(d, tab == 'ath');
-      if (cd.erro) return alert(cd.erro);
-      r = await sb.from('perfis').update(cd.dados).eq('id', tab == 'ath' ? editId : me.id);
-      if (!r.error && tab == 'ath') editId = '';
-    }
-    if (tab == 'reb') {
-      var an = await prepararAnexo(d.get('c'));
-      if (an.err) return alert(an.err);
-      r = await sb.from('reembolsos').insert({atleta_id: me.id, prova_id: d.get('p') || null, descricao: d.get('t'), valor: Number(d.get('v')), status: 'pendente', anexo_path: an.path});
-      if (r.error && an.path) await sb.storage.from('anexos').remove([an.path]);
-    }
-    if (r && r.error) return fail(r.error);
-    refresh();
   };
   var f2 = $('#f2');
   if (f2) f2.onsubmit = async function(e){
@@ -523,9 +526,33 @@ async function boot(){
   var s = await sb.auth.getSession();
   me = s.data.session ? s.data.session.user : null;
   if (HASH) { history.replaceState(null, '', location.pathname + location.search); HASH = ''; }
-  if (ENTRADA === 'signup' && me) { aviso = 'E-mail confirmado! Bem-vindo(a) à EAMSP. Complete seus dados na aba "Meus dados".'; tab = 'me'; ENTRADA = ''; }
+  if (ENTRADA === 'signup' && me) { aviso = 'E-mail confirmado! Bem-vindo(a) à EAMSP. Complete seu cadastro na aba "Minha conta".'; tab = 'conta'; ENTRADA = ''; }
   if (recovery || invite || !me) { prof = null; showAuth(); } else { await refresh(); }
 }
+function temaAtual(){
+  var t = document.documentElement.getAttribute('data-theme');
+  if (t === 'light' || t === 'dark') return t;
+  return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function aplicaTema(t){
+  if (t) document.documentElement.setAttribute('data-theme', t);
+  var b = $('#tema'); if (!b) return;
+  var escuro = temaAtual() === 'dark';
+  b.textContent = escuro ? 'Modo claro' : 'Modo escuro';
+  b.setAttribute('aria-label', escuro ? 'Mudar para o tema claro' : 'Mudar para o tema escuro');
+}
+function initTema(){
+  if (!document.documentElement) return;
+  var salvo = null; try { salvo = localStorage.getItem('eamsp-tema'); } catch (x) {}
+  aplicaTema(salvo === 'light' || salvo === 'dark' ? salvo : null);
+  var b = $('#tema');
+  if (b) b.onclick = function(){
+    var n = temaAtual() === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem('eamsp-tema', n); } catch (x) {}
+    aplicaTema(n);
+  };
+}
+initTema();
 (function(){
   if (typeof SUPABASE_URL === 'undefined' || SUPABASE_URL.indexOf('SEU-PROJETO') >= 0) {
     $('#app').innerHTML = '<p class="empty">Falta configurar o sistema: abra o arquivo config.js e cole a URL e a chave pública do seu projeto Supabase.</p>'; return;
