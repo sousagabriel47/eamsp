@@ -2,7 +2,7 @@ var HASH = location.hash || '';
 var ENTRADA = /type=invite/.test(HASH) ? 'invite' : /type=signup/.test(HASH) ? 'signup' : /type=recovery/.test(HASH) ? 'recovery' : '';
 var ERRO = /error(_code|_description)?=/.test(HASH);
 var PART = [], sb, me = null, prof = null, admin = false, sup = false, sim = '', realAdmin = false, realSup = false, eAtl = false, USR = [], P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', editId = '', SEN = [], loginMsg = '', IMP = {rows: [], erros: [], res: [], busy: false}, recovery = false, invite = (ENTRADA === 'invite'), aviso = '';
-var HR = [], previa = null, editRb = '', rbRasc = null;
+var AV = [], HR = [], previa = null, editRb = '', rbRasc = null;
 var MES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 function dig(t){ return String(t == null ? '' : t).replace(/\D/g, ''); }
 function cpfValido(c){
@@ -166,7 +166,7 @@ function viewInvite(){
   return '<h2>Aceitar convite</h2><p class="sum">Você foi convidado para o sistema da EAMSP. Informe seu nome e crie uma senha para ativar o acesso.</p><form id="f" style="max-width:420px;grid-template-columns:1fr"><label>Nome completo<input name="n" required autocomplete="name"></label><label>Senha (mínimo 8 caracteres)<input type="password" name="s" required minlength="8" autocomplete="new-password"></label><button class="btn">Ativar acesso</button><p id="msg" class="sum"></p></form>';
 }
 function showAuth(){
-  $('#nav').innerHTML = ''; $('#out').hidden = true; $('#sim').hidden = true; $('#role').textContent = 'Gestão da equipe de corrida';
+  $('#nav').innerHTML = ''; $('#out').hidden = true; $('#sino').hidden = true; $('#sim').hidden = true; $('#role').textContent = 'Gestão da equipe de corrida';
   if (invite && !me) invite = false;
   $('#app').innerHTML = invite ? viewInvite() : recovery ? viewRecovery() : viewAuth();
   if (loginMsg) { msg(loginMsg); loginMsg = ''; }
@@ -202,6 +202,29 @@ function showAuth(){
 }
 
 /* ---------- Funções puras ---------- */
+// Avisos calculados na hora (vencimentos e pendências). 'texto' já é HTML seguro (nomes escapados).
+function avisosCalculados(o){
+  var out = [];
+  function venc(rot, d, nome){
+    var t = st(d); if (!t[1]) return;
+    out.push({sev: t[1], texto: (nome ? esc(nome) + ': ' : '') + rot + ' — ' + t[0].charAt(0).toLowerCase() + t[0].slice(1)});
+  }
+  function alheios(l){return (l || []).filter(function(x){return x.status == 'pendente' && x.atleta_id !== o.meId}).length}
+  if (o.eAtl && o.prof) { venc('Atestado', o.prof.atestado_validade); venc('Anuidade', o.prof.anuidade_ate); }
+  if (o.admin) {
+    var nn = alheios(o.REN), nr = alheios(o.R);
+    if (nn) out.push({sev: '', texto: nn + (nn == 1 ? ' renovação pendente' : ' renovações pendentes')});
+    if (nr) out.push({sev: '', texto: nr + (nr == 1 ? ' reembolso pendente' : ' reembolsos pendentes')});
+    (o.ATL || []).forEach(function(a){
+      if (o.eAtl && a.id === o.meId) return;
+      venc('Atestado', a.atestado_validade, a.nome || 'Sem nome'); venc('Anuidade', a.anuidade_ate, a.nome || 'Sem nome');
+    });
+  }
+  return out;
+}
+function avisosAtuais(){return avisosCalculados({prof: prof, eAtl: eAtl, admin: admin, ATL: ATL, R: R, REN: REN, meId: me && me.id})}
+function totalAvisos(){return avisosAtuais().length + AV.filter(function(x){return !x.lido_em}).length}
+
 function datasRenovacao(x){
   if (!x || !x.emitido_em) return '';
   return 'Emitido em ' + br(x.emitido_em) + (x.pago_em ? ' • Pago em ' + br(x.pago_em) : '');
@@ -360,6 +383,18 @@ function usrList(){
   $('#ulist').innerHTML = h;
 }
 function initUsr(){ $('#uq').oninput = usrList; usrList(); }
+function viewAvisos(){
+  var calc = avisosAtuais(), nl = AV.filter(function(x){return !x.lido_em}).length;
+  var h = '<h2>Avisos</h2>';
+  if (!calc.length && !AV.length) return h + '<p class="empty">Nenhum aviso.</p>';
+  calc.forEach(function(x){h += '<div class="al ' + (x.sev == 'b' ? 'bad' : '') + '">' + x.texto + '</div> '});
+  if (AV.length) h += '<h2>Histórico</h2>' + (nl ? '<p><button class="btn s x" data-lidot="1">Marcar todos como lidos</button></p>' : '');
+  AV.forEach(function(x){
+    h += '<div class="item"' + (x.lido_em ? ' style="opacity:.6"' : '') + '><div class="info"><b>' + esc(x.texto) + '</b><small>' + br(String(x.criado_em).slice(0, 10)) + '</small></div>' +
+      (x.lido_em ? '' : '<button class="btn s x" data-lido="' + esc(x.id) + '">Marcar como lido</button>') + '</div>';
+  });
+  return h;
+}
 function viewConta(){
   return '<h2>Minha conta</h2><div class="item"><div class="info"><b>' + esc(prof.nome || 'Sem nome') + '</b><small>' + esc(me.email) + ' · ' + PAP[prof.papel] + ' · ' + STT[prof.status || 'ativo'] + '</small></div></div>' +
     '<h2>Meus dados cadastrais</h2><p class="sum">Mantenha nome, CPF, telefone e data de nascimento atualizados. A data de adesão à equipe é definida pela gestão.</p>' + formCadastro(prof, realAdmin, true) +
@@ -474,10 +509,11 @@ async function refresh(){
     sb.from('renovacoes').select('*, perfis(nome)').order('criado_em', {ascending: false}),
     sup ? sb.from('perfis').select('*').order('nome') : Promise.resolve({data: []}),
     sup ? sb.from('solicitacoes_senha').select('*, perfis(nome,status)').order('criado_em', {ascending: false}).limit(100) : Promise.resolve({data: []}),
-    sb.from('prova_participantes').select(admin ? '*, perfis(nome)' : '*')
+    sb.from('prova_participantes').select(admin ? '*, perfis(nome)' : '*'),
+    sb.from('avisos').select('*').order('criado_em', {ascending: false}).limit(50)
   ]);
   for (var i = 0; i < a.length; i++) if (a[i].error) return fail(a[i].error);
-  P = a[0].data; R = a[1].data; ATL = a[2].data; HR = a[3].data; REN = a[4].data; USR = a[5].data; SEN = a[6].data; PART = a[7].data || []; render();
+  P = a[0].data; R = a[1].data; ATL = a[2].data; HR = a[3].data; REN = a[4].data; USR = a[5].data; SEN = a[6].data; PART = a[7].data || []; AV = a[8].data || []; render();
 }
 function render(){
   admin = realAdmin; sup = realSup; eAtl = !!prof.atleta;
@@ -490,11 +526,12 @@ function render(){
   var np = REN.filter(function(x){return x.status == 'pendente'}).length, nr = R.filter(function(x){return x.status == 'pendente'}).length;
   var ns = SEN.filter(function(x){return x.status == 'pendente'}).length;
   var tabs = (admin ? [['cal','Calendário'],['ath','Atletas'],['ren','Renovações' + (np ? ' (' + np + ')' : '')],['reb','Reembolsos' + (nr ? ' (' + nr + ')' : '')]].concat(eAtl ? [['me','Atestado e anuidade']] : []).concat(sup ? [['usr','Usuários'],['sen','Senhas' + (ns ? ' (' + ns + ')' : '')],['imp','Importar CSV']] : []) : [['cal','Calendário'],['me','Atestado e anuidade'],['reb','Reembolsos']]).concat([['conta','Minha conta']]);
-  if (!tabs.some(function(t){return t[0] == tab})) tab = 'cal';
+  if (tab != 'avi' && !tabs.some(function(t){return t[0] == tab})) tab = 'cal';
+  var na = totalAvisos(); $('#sino').hidden = false; $('#sino').textContent = 'Avisos (' + na + ')';
   $('#nav').innerHTML = tabs.map(function(t){return '<button data-t="' + t[0] + '"' + (t[0] == tab ? ' class="on"' : '') + '>' + t[1] + '</button>'}).join('');
   $('#role').textContent = (sim ? 'Simulando a visão de ' + (sim === 'gestao' ? 'gestão' : 'atleta') : realSup ? 'Acesso de administrador' : realAdmin ? 'Acesso de gestão' : 'Acesso de atleta') + (prof.nome ? ' · ' + prof.nome : '');
   $('#out').hidden = false; $('#sim').hidden = !realSup; $('#sim').value = sim;
-  $('#app').innerHTML = (sim ? '<div class="al" role="status">Modo simulação: você está vendo a tela de ' + (sim === 'gestao' ? 'gestão' : 'atleta') + ', somente leitura.</div>' : '') + (aviso ? '<div class="al" role="status" style="border-color:#0B7A64">' + esc(aviso) + '</div>' : '') + ({cal: viewCal, ath: viewAth, me: viewMine, ren: viewRen, reb: viewReb, usr: viewUsr, conta: viewConta, sen: viewSen, imp: viewImp})[tab]();
+  $('#app').innerHTML = (sim ? '<div class="al" role="status">Modo simulação: você está vendo a tela de ' + (sim === 'gestao' ? 'gestão' : 'atleta') + ', somente leitura.</div>' : '') + (aviso ? '<div class="al" role="status" style="border-color:#0B7A64">' + esc(aviso) + '</div>' : '') + ({cal: viewCal, ath: viewAth, me: viewMine, ren: viewRen, reb: viewReb, usr: viewUsr, conta: viewConta, sen: viewSen, imp: viewImp, avi: viewAvisos})[tab]();
   if (tab == 'usr') initUsr();
   if (tab == 'imp') initImp();
   R = _R; REN = _REN;
@@ -575,7 +612,7 @@ document.addEventListener('click', async function(e){
   if (b.dataset.impdl) { baixar('resultado_convites.csv', 'email;status;detalhe\n' + IMP.res.map(function(x){return [x.email, x.status, '"' + String(x.detalhe || '').replace(/"/g, '""') + '"'].join(';')}).join('\n')); return; }
   if (b.dataset.impgo) { await enviarLote(); return; }
   if (b.dataset.pdf) { await abrirAnexo(b.dataset.pdf); return; }
-  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.st || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn || b.dataset.rbok || b.dataset.rv || b.dataset.vc || b.dataset.vs)) { alert(MSGSIM); return; }
+  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.st || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn || b.dataset.rbok || b.dataset.rv || b.dataset.vc || b.dataset.vs || b.dataset.lido || b.dataset.lidot !== undefined)) { alert(MSGSIM); return; }
   if (b.dataset.lt) {
     var pl = P.filter(function(x){return x.id === b.dataset.lt})[0];
     if (pl) { var url = URL.createObjectURL(new Blob([listaTendaHtml(pl, PART.filter(function(x){return x.prova_id === pl.id}))], {type: 'text/html'})); window.open(url, '_blank'); }
@@ -586,6 +623,8 @@ document.addEventListener('click', async function(e){
     var sel = b.closest('.info').querySelector('select.dsel');
     r = await sb.from('prova_participantes').insert({prova_id: b.dataset.vc, atleta_id: me.id, distancia_id: sel.value});
   }
+  else if (b.dataset.lido) { r = await sb.from('avisos').update({lido_em: new Date().toISOString()}).eq('id', b.dataset.lido); }
+  else if (b.dataset.lidot !== undefined) { r = await sb.from('avisos').update({lido_em: new Date().toISOString()}).is('lido_em', null); }
   else if (b.dataset.vs) { r = await sb.from('prova_participantes').delete().eq('prova_id', b.dataset.vs).eq('atleta_id', me.id); }
   else if (b.dataset.delp) { if (!confirm('Excluir esta prova?')) return; r = await sb.from('provas').delete().eq('id', b.dataset.delp); }
   else if (b.dataset.st) {
