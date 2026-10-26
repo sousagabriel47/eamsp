@@ -2,6 +2,7 @@ var HASH = location.hash || '';
 var ENTRADA = /type=invite/.test(HASH) ? 'invite' : /type=signup/.test(HASH) ? 'signup' : /type=recovery/.test(HASH) ? 'recovery' : '';
 var ERRO = /error(_code|_description)?=/.test(HASH);
 var sb, me = null, prof = null, admin = false, sup = false, sim = '', realAdmin = false, realSup = false, eAtl = false, USR = [], P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', editId = '', SEN = [], loginMsg = '', IMP = {rows: [], erros: [], res: [], busy: false}, recovery = false, invite = (ENTRADA === 'invite'), aviso = '';
+var HR = [], previa = null, editRb = '', rbRasc = null;
 var MES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 function dig(t){ return String(t == null ? '' : t).replace(/\D/g, ''); }
 function cpfValido(c){
@@ -206,6 +207,34 @@ function datasRenovacao(x){
   return 'Emitido em ' + br(x.emitido_em) + (x.pago_em ? ' • Pago em ' + br(x.pago_em) : '');
 }
 
+function valorProva(provaId){
+  if (!provaId) return null;
+  var p = P.filter(function(x){return x.id === provaId})[0];
+  return p && p.valor_inscricao != null ? Number(p.valor_inscricao) : null;
+}
+function previaReembolso(d){
+  var h = '<div class="item"><div class="info"><b>Confira antes de enviar</b>';
+  h += '<small>Prova: ' + esc(d.prova || 'Sem prova') + '</small><br><small>Descrição: ' + esc(d.descricao) + '</small>';
+  if (d.valorProva != null) h += '<br><small>Valor da inscrição: ' + esc(money(d.valorProva)) + '</small>';
+  h += '<br><small>Valor solicitado: ' + esc(money(d.valor)) + '</small>';
+  if (d.valorProva != null) {
+    var df = Math.round((d.valor - d.valorProva) * 100) / 100;
+    h += '<br><small>Diferença: ' + (df > 0 ? '+ ' : df < 0 ? '- ' : '') + esc(money(Math.abs(df))) + '</small>';
+  }
+  h += '<br><small>Comprovante: ' + esc(d.anexo || 'nenhum') + '</small></div></div>';
+  return h;
+}
+function historicoReembolso(r, hr){
+  var rows = (hr || []).filter(function(x){return x.reembolso_id === r.id}).sort(function(a, b){return String(a.alterado_em).localeCompare(String(b.alterado_em))});
+  if (!rows.length) return '';
+  var h = '<details style="flex-basis:100%"><summary style="cursor:pointer;color:var(--g);font-weight:600">Histórico (' + rows.length + ')</summary>';
+  rows.forEach(function(x){
+    var quem = x.alterado_por === r.atleta_id ? 'Atleta' : 'Gestão';
+    h += '<div style="font-size:14px;padding:2px 0">' + esc((STL[x.status_anterior] || x.status_anterior || '—') + ' → ' + (STL[x.status_novo] || x.status_novo) + ' · ' + quem + ' · ' + br(String(x.alterado_em).slice(0,10)) + (x.motivo ? ' · Motivo: ' + x.motivo : '')) + '</div>';
+  });
+  return h + '</details>';
+}
+
 /* ---------- Telas ---------- */
 function reembProva(p){
   if (!admin) return '';
@@ -222,7 +251,7 @@ function reembProva(p){
 }
 function viewCal(){
   var h = '<h2>Calendário de provas</h2>';
-  if (admin) h += '<form id="f"><label>Prova<input name="n" required></label><label>Data<input type="date" name="d" required></label><label>Local<input name="l"></label><label>Distância<input name="k" placeholder="10 km"></label><label>Inscrição até<input type="date" name="i"></label><label>Link de inscrição<input type="url" name="u" placeholder="https://..." pattern="https?://.+"></label><button class="btn">Adicionar prova</button></form>';
+  if (admin) h += '<form id="f"><label>Prova<input name="n" required></label><label>Data<input type="date" name="d" required></label><label>Local<input name="l"></label><label>Distância<input name="k" placeholder="10 km"></label><label>Inscrição até<input type="date" name="i"></label><label>Valor da inscrição (R$)<input type="number" name="v" step="0.01" min="0"></label><label>Link de inscrição<input type="url" name="u" placeholder="https://..." pattern="https?://.+"></label><button class="btn">Adicionar prova</button></form>';
   var m = '';
   if (!P.length) h += '<p class="empty">Nenhuma prova cadastrada' + (admin ? '. Adicione a primeira acima.' : ' ainda.') + '</p>';
   P.forEach(function(p){
@@ -361,7 +390,13 @@ function viewReb(){
   if (eAtl) {
     if (!prof.nome) h += '<p class="empty">Preencha seu nome em "Minha conta" antes de pedir reembolso.</p>';
     else {
-      h += '<form id="f"><label>Prova<select name="p"><option value="">Sem prova</option>' + opts(P, function(x){return x.nome}) + '</select></label><label>Descrição<input name="t" placeholder="Inscrição, transporte…" required></label><label>Valor (R$)<input type="number" name="v" step="0.01" min="0.01" required></label><label>Comprovante em PDF (até 5 MB)<input type="file" name="c" accept="application/pdf,.pdf"' + (EXIGIR_ANEXO ? ' required' : '') + '></label><button class="btn">Solicitar reembolso</button></form>';
+      if (previa) {
+        h += previaReembolso(previa) + '<div class="acts"><button class="btn" data-rbok="1">Confirmar envio</button><button class="btn s x" data-rbno="1">Voltar</button></div>';
+      } else {
+        var er = editRb ? R.filter(function(x){return x.id === editRb})[0] : null;
+        if (editRb && !er) editRb = '';
+        h += (er ? '<h2>Reenviar reembolso</h2>' : '') + '<form id="f"><label>Prova<select name="p" onchange="var v=valorProva(this.value);if(v!=null)this.form.v.value=v"><option value="">Sem prova</option>' + opts(P, function(x){return x.nome}) + '</select></label><label>Descrição<input name="t" placeholder="Inscrição, transporte…" required></label><label>Valor (R$)<input type="number" name="v" step="0.01" min="0.01" required></label><label>Comprovante em PDF (até 5 MB)<input type="file" name="c" accept="application/pdf,.pdf"' + (EXIGIR_ANEXO && !(er && er.anexo_path) ? ' required' : '') + '></label><button class="btn">' + (er ? 'Revisar e reenviar' : 'Solicitar reembolso') + '</button>' + (er ? '<button type="button" class="btn s x" data-rbno="1">Cancelar</button>' : '') + '</form>';
+      }
     }
   }
   if (admin) {
@@ -374,9 +409,10 @@ function viewReb(){
     var c = r.status == 'recusado' || r.status == 'cancelado' ? 'b' : r.status == 'pendente' ? 'w' : '';
     var nome = r.perfis && r.perfis.nome ? r.perfis.nome : 'Sem nome', own = r.atleta_id === me.id;
     h += '<div class="item"><div class="info"><b>' + (admin ? esc(nome) + (own ? ' (você)' : '') + ' · ' : '') + money(r.valor) + '</b><small>' + esc(r.descricao) + (r.provas ? ' • ' + esc(r.provas.nome) : '') + ' • ' + br(r.criado_em.slice(0,10)) + (r.status == 'recusado' && r.motivo_decisao ? ' • Motivo: ' + esc(r.motivo_decisao) : '') + '</small></div><span class="tag ' + c + '">' + STL[r.status] + '</span><div class="acts">' + pdfBtn(r) +
+      (own && r.status == 'recusado' ? '<button class="btn s g" data-rv="' + esc(r.id) + '">Corrigir e reenviar</button>' : '') +
       (admin && !own && r.status == 'pendente' ? '<button class="btn s g" data-st="aprovado|' + r.id + '">Aprovar</button><button class="btn s x" data-st="recusado|' + r.id + '">Recusar</button>' : '') +
       (admin && !own && r.status == 'aprovado' ? '<button class="btn s g" data-st="pago|' + r.id + '">Marcar como pago</button>' : '') +
-      (own && r.status == 'pendente' ? '<span class="tag w">Aguarda outro gestor</span>' : '') + (own && r.status == 'pendente' ? '<button class="btn s x" data-st="cancelado|' + r.id + '">Cancelar</button>' : '') + '</div></div>';
+      (own && r.status == 'pendente' ? '<span class="tag w">Aguarda outro gestor</span>' : '') + (own && r.status == 'pendente' ? '<button class="btn s x" data-st="cancelado|' + r.id + '">Cancelar</button>' : '') + '</div>' + historicoReembolso(r, HR) + '</div>';
   });
   return h;
 }
@@ -392,12 +428,13 @@ async function refresh(){
     sb.from('provas').select('*').order('data'),
     sb.from('reembolsos').select('*, perfis(nome), provas(nome)').order('criado_em', {ascending: false}),
     admin ? sb.from('perfis').select('*').eq('atleta', true) : Promise.resolve({data: []}),
+    sb.from('reembolso_historico').select('*').order('alterado_em'),
     sb.from('renovacoes').select('*, perfis(nome)').order('criado_em', {ascending: false}),
     sup ? sb.from('perfis').select('*').order('nome') : Promise.resolve({data: []}),
     sup ? sb.from('solicitacoes_senha').select('*, perfis(nome,status)').order('criado_em', {ascending: false}).limit(100) : Promise.resolve({data: []})
   ]);
   for (var i = 0; i < a.length; i++) if (a[i].error) return fail(a[i].error);
-  P = a[0].data; R = a[1].data; ATL = a[2].data; REN = a[3].data; USR = a[4].data; SEN = a[5].data; render();
+  P = a[0].data; R = a[1].data; ATL = a[2].data; HR = a[3].data; REN = a[4].data; USR = a[5].data; SEN = a[6].data; render();
 }
 function render(){
   admin = realAdmin; sup = realSup; eAtl = !!prof.atleta;
@@ -419,9 +456,17 @@ function render(){
   if (tab == 'imp') initImp();
   R = _R; REN = _REN;
   var f = $('#f');
+  if (f && tab == 'reb') {
+    var er2 = editRb ? R.filter(function(x){return x.id === editRb})[0] : null, src = rbRasc || (er2 ? {pid: er2.prova_id || '', descricao: er2.descricao, valor: er2.valor} : null);
+    if (src) {
+      f.p.value = src.pid; f.t.value = src.descricao; f.v.value = src.valor;
+      if (src.arquivo) { try { var dt = new DataTransfer(); dt.items.add(src.arquivo); f.c.files = dt.files; } catch (x) {} }
+    }
+    rbRasc = null;
+  }
   if (f) f.onsubmit = async function(e){
     e.preventDefault(); if (sim) return alert(MSGSIM); var d = new FormData(f), r;
-    if (tab == 'cal') r = await sb.from('provas').insert({nome: d.get('n'), data: d.get('d'), local: d.get('l'), distancia: d.get('k'), inscricao_ate: d.get('i') || null, link_inscricao: d.get('u') || null});
+    if (tab == 'cal') r = await sb.from('provas').insert({nome: d.get('n'), data: d.get('d'), local: d.get('l'), distancia: d.get('k'), inscricao_ate: d.get('i') || null, link_inscricao: d.get('u') || null, valor_inscricao: d.get('v') === '' ? null : Number(d.get('v'))});
     if (tab == 'ath' || tab == 'conta') {
       var cd = lerCadastro(d, tab == 'ath' || realAdmin);
       if (cd.erro) return alert(cd.erro);
@@ -429,10 +474,9 @@ function render(){
       if (!r.error) { if (tab == 'ath') editId = ''; else aviso = 'Dados salvos.'; }
     }
     if (tab == 'reb') {
-      var an = await prepararAnexo(d.get('c'));
-      if (an.err) return alert(an.err);
-      r = await sb.from('reembolsos').insert({atleta_id: me.id, prova_id: d.get('p') || null, descricao: d.get('t'), valor: Number(d.get('v')), status: 'pendente', anexo_path: an.path});
-      if (r.error && an.path) await sb.storage.from('anexos').remove([an.path]);
+      var pid = d.get('p') || '', pvr = P.filter(function(x){return x.id === pid})[0], fa = d.get('c');
+      previa = {pid: pid, prova: pvr ? pvr.nome : '', descricao: d.get('t'), valor: Number(d.get('v')), valorProva: valorProva(pid), anexo: fa && fa.size ? fa.name : '', arquivo: fa && fa.size ? fa : null};
+      render(); window.scrollTo(0, 0); return;
     }
     if (r && r.error) return fail(r.error);
     refresh();
@@ -471,14 +515,15 @@ document.addEventListener('click', async function(e){
   var b = e.target.closest('button'); if (!b) return;
   if (b.dataset.am) { authMode = b.dataset.am; showAuth(); return; }
   if (b.id === 'out') { await sb.auth.signOut(); return; }
-  if (b.dataset.t) { tab = b.dataset.t; aviso = ''; editId = ''; refresh(); return; }
+  if (b.dataset.t) { tab = b.dataset.t; aviso = ''; editId = ''; editRb = ''; previa = null; rbRasc = null; refresh(); return; }
+  if (b.dataset.rbno) { if (previa) rbRasc = {pid: previa.pid, descricao: previa.descricao, valor: previa.valor, arquivo: previa.arquivo}; else editRb = ''; previa = null; render(); return; }
   if (b.dataset.ed) { editId = b.dataset.ed; render(); window.scrollTo(0, 0); return; }
   if (b.dataset.edc) { editId = ''; render(); return; }
   if (b.dataset.impmod) { baixar('modelo_cadastro.csv', 'nome;email;papel;atleta;cpf;telefone;data_nascimento;data_adesao\nMaria Souza;maria@exemplo.com;atleta;sim;529.982.247-25;(11) 98888-7777;15/03/1990;01/02/2024\nJoão Lima;joao@exemplo.com;gestao;sim;;11977776666;1985-07-20;2023-05-10\n'); return; }
   if (b.dataset.impdl) { baixar('resultado_convites.csv', 'email;status;detalhe\n' + IMP.res.map(function(x){return [x.email, x.status, '"' + String(x.detalhe || '').replace(/"/g, '""') + '"'].join(';')}).join('\n')); return; }
   if (b.dataset.impgo) { await enviarLote(); return; }
   if (b.dataset.pdf) { await abrirAnexo(b.dataset.pdf); return; }
-  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.st || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn)) { alert(MSGSIM); return; }
+  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.st || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn || b.dataset.rbok || b.dataset.rv)) { alert(MSGSIM); return; }
   var r;
   if (b.dataset.delp) { if (!confirm('Excluir esta prova?')) return; r = await sb.from('provas').delete().eq('id', b.dataset.delp); }
   else if (b.dataset.st) {
@@ -486,6 +531,19 @@ document.addEventListener('click', async function(e){
     if (p[0] === 'recusado') { u.motivo_decisao = (prompt('Motivo da recusa (obrigatório):') || '').trim(); if (!u.motivo_decisao) return; }
     else if (p[0] === 'aprovado' && !confirm('Aprovar este reembolso?')) return;
     r = await sb.from('reembolsos').update(u).eq('id', p[1]);
+  }
+  else if (b.dataset.rv) { editRb = b.dataset.rv; previa = null; rbRasc = null; render(); window.scrollTo(0, 0); return; }
+  else if (b.dataset.rbok) {
+    if (!previa) return;
+    b.disabled = true;
+    var er3 = editRb ? R.filter(function(x){return x.id === editRb})[0] : null;
+    var an = er3 && er3.anexo_path && !previa.arquivo ? {path: null} : await prepararAnexo(previa.arquivo);
+    if (an.err) { b.disabled = false; return alert(an.err); }
+    if (er3) r = await sb.from('reembolsos').update({prova_id: previa.pid || null, descricao: previa.descricao, valor: previa.valor, anexo_path: an.path || er3.anexo_path || null, status: 'pendente'}).eq('id', er3.id);
+    else r = await sb.from('reembolsos').insert({atleta_id: me.id, prova_id: previa.pid || null, descricao: previa.descricao, valor: previa.valor, status: 'pendente', anexo_path: an.path});
+    if (r.error && an.path) await sb.storage.from('anexos').remove([an.path]);
+    b.disabled = false;
+    if (!r.error) { previa = null; editRb = ''; }
   }
   else if (b.dataset.lk) {
     var pv = P.filter(function(x){return x.id === b.dataset.lk})[0];
