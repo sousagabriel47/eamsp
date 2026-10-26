@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SO_SCHEMA=1 aplica só o schema.sql (instalação nova), sem migracao_v2.sql.
 # Aplica stub + schema.sql + migracao_v2.sql (2x, se existir) num PostgreSQL
 # temporário e roda cada tests/sql/[1-9]*.sql. Sai com código != 0 em qualquer falha.
 set -uo pipefail
@@ -42,7 +43,7 @@ apply() {
 
 apply "$ROOT/tests/sql/00_stub.sql"
 apply "$ROOT/schema.sql"
-if [ -f "$ROOT/migracao_v2.sql" ]; then
+if [ -z "${SO_SCHEMA:-}" ] && [ -f "$ROOT/migracao_v2.sql" ]; then
   apply "$ROOT/migracao_v2.sql"
   apply "$ROOT/migracao_v2.sql"   # idempotência
 fi

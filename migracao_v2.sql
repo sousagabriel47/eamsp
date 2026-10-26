@@ -1,5 +1,7 @@
--- migracao_v2.sql — melhorias EAMSP (v2). Idempotente: pode ser rodada mais de uma vez.
--- Rode no SQL Editor do Supabase DEPOIS do schema.sql. Cada seção abaixo é independente.
+-- migracao_v2.sql — melhorias EAMSP (v2).
+-- Para quem já tem o sistema instalado; instalações novas usam apenas o schema.sql
+-- (que já inclui este conteúdo na seção 4K).
+-- Idempotente: pode ser rodada mais de uma vez. Rode no SQL Editor do Supabase.
 
 -- V2.1) RENOVAÇÕES: data de emissão e de pagamento ---------------------------------------
 alter table public.renovacoes add column if not exists emitido_em date;
