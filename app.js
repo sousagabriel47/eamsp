@@ -235,6 +235,24 @@ function valorProva(provaId){
   var p = P.filter(function(x){return x.id === provaId})[0];
   return p && p.valor_inscricao != null ? Number(p.valor_inscricao) : null;
 }
+// Valor digitado (vírgula ou ponto): {ok, valor}; vazio = remover (valor null)
+function lerValorInscricao(t){
+  t = String(t == null ? '' : t).trim();
+  if (!t) return {ok: true, valor: null};
+  if (!/^\d+([.,]\d+)?$/.test(t)) return {ok: false, valor: null};
+  var v = Number(t.replace(',', '.'));
+  return isFinite(v) && v >= 0 ? {ok: true, valor: v} : {ok: false, valor: null};
+}
+// Rótulos novos de distância: sem vazios, sem repetidos e sem os que já existem (ignora caixa)
+function novasDistancias(txt, existentes){
+  var vistos = {}, out = [];
+  (existentes || []).forEach(function(x){vistos[String(x).trim().toLowerCase()] = 1});
+  String(txt || '').split(',').forEach(function(x){
+    x = x.trim();
+    if (x && !vistos[x.toLowerCase()]) { vistos[x.toLowerCase()] = 1; out.push(x); }
+  });
+  return out;
+}
 function previaReembolso(d){
   var h = '<div class="item"><div class="info"><b>Confira antes de enviar</b>';
   h += '<small>Prova: ' + esc(d.prova || 'Sem prova') + '</small><br><small>Descrição: ' + esc(d.descricao) + '</small>';
@@ -244,7 +262,7 @@ function previaReembolso(d){
     var df = Math.round((d.valor - d.valorProva) * 100) / 100;
     h += '<br><small>Diferença: ' + (df > 0 ? '+ ' : df < 0 ? '- ' : '') + esc(money(Math.abs(df))) + '</small>';
   }
-  h += '<br><small>Comprovante: ' + esc(d.anexo || 'nenhum') + '</small></div></div>';
+  h += '<br><small>Comprovante: ' + esc(d.anexo || (d.mantido ? 'mantido o comprovante anterior' : 'nenhum')) + '</small></div></div>';
   return h;
 }
 function historicoReembolso(r, hr){
@@ -323,7 +341,7 @@ function viewCal(){
     var ym = p.data.slice(0,7);
     if (ym !== m) { m = ym; h += '<div class="mes">' + MES[+ym.slice(5)-1] + ' de ' + ym.slice(0,4) + '</div>'; }
     var n = days(p.data), ins = p.inscricao_ate ? (days(p.inscricao_ate) < 0 ? 'Inscrições encerradas' : 'Inscrição até ' + br(p.inscricao_ate)) : '';
-    h += '<div class="item"><div class="date">' + p.data.slice(8) + '<small>' + MES[+p.data.slice(5,7)-1].slice(0,3) + '</small></div><div class="info"><b>' + esc(p.nome) + '</b><small>' + esc([p.local, ins].filter(Boolean).join(' • ')) + '</small>' + provaDist(p) + '</div>' + (n < 0 ? '<span class="tag">Realizada</span>' : '<span class="tag ' + (n <= 14 ? 'w' : '') + '">' + (n == 0 ? 'Hoje' : 'em ' + n + ' d') + '</span>') + (n >= 0 && p.link_inscricao && /^https?:\/\//i.test(p.link_inscricao) ? '<a class="btn s" href="' + esc(p.link_inscricao) + '" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:inline-block">Inscrever-se</a>' : '') + (admin ? '<button class="btn s x" data-lk="' + esc(p.id) + '">Link</button><button class="btn s x" data-delp="' + esc(p.id) + '">Excluir</button>' : '') + reembProva(p) + '</div>';
+    h += '<div class="item"><div class="date">' + p.data.slice(8) + '<small>' + MES[+p.data.slice(5,7)-1].slice(0,3) + '</small></div><div class="info"><b>' + esc(p.nome) + '</b><small>' + esc([p.local, ins].filter(Boolean).join(' • ')) + '</small>' + provaDist(p) + '</div>' + (n < 0 ? '<span class="tag">Realizada</span>' : '<span class="tag ' + (n <= 14 ? 'w' : '') + '">' + (n == 0 ? 'Hoje' : 'em ' + n + ' d') + '</span>') + (n >= 0 && p.link_inscricao && /^https?:\/\//i.test(p.link_inscricao) ? '<a class="btn s" href="' + esc(p.link_inscricao) + '" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:inline-block">Inscrever-se</a>' : '') + (admin ? '<button class="btn s x" data-ep="' + esc(p.id) + '">Editar</button><button class="btn s x" data-lk="' + esc(p.id) + '">Link</button><button class="btn s x" data-delp="' + esc(p.id) + '">Excluir</button>' : '') + reembProva(p) + '</div>';
   });
   return h;
 }
@@ -564,7 +582,7 @@ function render(){
     }
     if (tab == 'reb') {
       var pid = d.get('p') || '', pvr = P.filter(function(x){return x.id === pid})[0], fa = d.get('c');
-      previa = {pid: pid, prova: pvr ? pvr.nome : '', descricao: d.get('t'), valor: Number(d.get('v')), valorProva: valorProva(pid), anexo: fa && fa.size ? fa.name : '', arquivo: fa && fa.size ? fa : null};
+      previa = {pid: pid, prova: pvr ? pvr.nome : '', descricao: d.get('t'), valor: Number(d.get('v')), valorProva: valorProva(pid), anexo: fa && fa.size ? fa.name : '', mantido: !!(editRb && !(fa && fa.size) && (R.filter(function(x){return x.id === editRb})[0] || {}).anexo_path), arquivo: fa && fa.size ? fa : null};
       render(); window.scrollTo(0, 0); return;
     }
     if (r && r.error) return fail(r.error);
@@ -612,7 +630,7 @@ document.addEventListener('click', async function(e){
   if (b.dataset.impdl) { baixar('resultado_convites.csv', 'email;status;detalhe\n' + IMP.res.map(function(x){return [x.email, x.status, '"' + String(x.detalhe || '').replace(/"/g, '""') + '"'].join(';')}).join('\n')); return; }
   if (b.dataset.impgo) { await enviarLote(); return; }
   if (b.dataset.pdf) { await abrirAnexo(b.dataset.pdf); return; }
-  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.st || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn || b.dataset.rbok || b.dataset.rv || b.dataset.vc || b.dataset.vs || b.dataset.lido || b.dataset.lidot !== undefined)) { alert(MSGSIM); return; }
+  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.ep || b.dataset.st || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn || b.dataset.rbok || b.dataset.rv || b.dataset.vc || b.dataset.vs || b.dataset.lido || b.dataset.lidot !== undefined)) { alert(MSGSIM); return; }
   if (b.dataset.lt) {
     var pl = P.filter(function(x){return x.id === b.dataset.lt})[0];
     if (pl) { var url = URL.createObjectURL(new Blob([listaTendaHtml(pl, PART.filter(function(x){return x.prova_id === pl.id}))], {type: 'text/html'})); window.open(url, '_blank'); }
@@ -645,6 +663,24 @@ document.addEventListener('click', async function(e){
     if (r.error && an.path) await sb.storage.from('anexos').remove([an.path]);
     b.disabled = false;
     if (!r.error) { previa = null; editRb = ''; }
+  }
+  else if (b.dataset.ep) {
+    var pe = P.filter(function(x){return x.id === b.dataset.ep})[0];
+    if (!pe) return;
+    var vt = prompt('Valor da inscrição (R$). Deixe em branco para remover:', pe.valor_inscricao != null ? String(pe.valor_inscricao).replace('.', ',') : '');
+    if (vt === null) return;
+    var vl = lerValorInscricao(vt);
+    if (!vl.ok) { alert('Informe um valor válido, como 150,00.'); return; }
+    var lpNovo = confirm('Esta prova terá lista de presença?\nSituação atual: ' + (pe.tem_lista_presenca ? 'COM lista' : 'SEM lista') + '.\nOK = com lista; Cancelar = sem lista.');
+    var dExist = distanciasProva(pe), dt2 = prompt('Novas distâncias a acrescentar (separadas por vírgula; deixe em branco para não alterar):', '');
+    if (dt2 === null) return;
+    var dNovas = novasDistancias(dt2, dExist.map(function(x){return x.rotulo}));
+    if (lpNovo && !dExist.length && !dNovas.length) { alert('Cadastre ao menos uma distância para usar a lista de presença.'); return; }
+    r = await sb.from('provas').update({valor_inscricao: vl.valor, tem_lista_presenca: lpNovo}).eq('id', pe.id);
+    if (!r.error && dNovas.length) {
+      var ordem0 = dExist.reduce(function(m, x){return Math.max(m, x.ordem || 0)}, -1) + 1;
+      r = await sb.from('prova_distancias').insert(dNovas.map(function(x, i){return {prova_id: pe.id, rotulo: x, ordem: ordem0 + i}}));
+    }
   }
   else if (b.dataset.lk) {
     var pv = P.filter(function(x){return x.id === b.dataset.lk})[0];

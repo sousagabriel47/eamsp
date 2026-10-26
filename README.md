@@ -1,6 +1,6 @@
 # Sistema EAMSP no GitHub Pages (versão simples)
 
-Site estático (HTML + JavaScript) publicado no GitHub Pages. Os dados ficam no Supabase; o sistema **não guarda arquivos**: só nomes, datas de validade (atestado e anuidade), provas e pedidos de reembolso.
+Site estático (HTML + JavaScript) publicado no GitHub Pages. Os dados ficam no Supabase; o sistema guarda apenas os comprovantes de reembolso em PDF (em um bucket privado, de até 5 MB cada) e nenhum outro arquivo; o restante são nomes, datas de validade (atestado e anuidade), provas e pedidos de reembolso.
 
 ## Passo a passo
 1. **Supabase:** crie um projeto (região São Paulo, se disponível). No *SQL Editor*, cole o `schema.sql` e clique em *Run*. (Quem já tinha instalado uma versão anterior: veja "Atualizar uma instalação existente".)
@@ -13,7 +13,7 @@ Site estático (HTML + JavaScript) publicado no GitHub Pages. Os dados ficam no 
 7. **Teste de permissões:** com duas contas de atleta e uma de gestão, siga o roteiro do fim do `schema.sql`.
 
 ## Atualizar uma instalação existente
-Quem já tem o sistema instalado **não** roda o `schema.sql` de novo: abra o *SQL Editor* do Supabase, cole o `migracao_v2.sql` e clique em *Run*, uma vez. Pode rodar de novo sem problema (ele não duplica nada). Instalações novas usam apenas o `schema.sql`, que já inclui tudo. Para instalações anteriores aos níveis de acesso, rode antes o `migracao_niveis.sql`.
+Quem já tem o sistema instalado **não** roda o `schema.sql` de novo: abra o *SQL Editor* do Supabase, cole o `migracao_v2.sql` e clique em *Run*, uma vez. Pode rodar de novo sem problema (ele não duplica nada). Instalações novas usam apenas o `schema.sql`, que já inclui tudo. Para instalações anteriores aos níveis de acesso, rode antes o `migracao_niveis.sql`. Publique a migração do banco e o novo `app.js` juntos: um `app.js` antigo, ainda em cache, que aprove renovações depois da migração recebe o erro "Informe a data de emissão".
 
 ## Funções da versão 2
 - **Reembolso:** o valor da inscrição é preenchido a partir da prova escolhida; antes de enviar há uma prévia do pedido; se for recusado, o atleta corrige e reenvia o mesmo pedido, e o histórico de tentativas fica guardado.
