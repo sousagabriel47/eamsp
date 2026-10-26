@@ -1,7 +1,7 @@
 var HASH = location.hash || '';
 var ENTRADA = /type=invite/.test(HASH) ? 'invite' : /type=signup/.test(HASH) ? 'signup' : /type=recovery/.test(HASH) ? 'recovery' : '';
 var ERRO = /error(_code|_description)?=/.test(HASH);
-var sb, me = null, prof = null, admin = false, sup = false, sim = '', realAdmin = false, realSup = false, eAtl = false, USR = [], P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', editId = '', SEN = [], loginMsg = '', IMP = {rows: [], erros: [], res: [], busy: false}, recovery = false, invite = (ENTRADA === 'invite'), aviso = '';
+var PART = [], sb, me = null, prof = null, admin = false, sup = false, sim = '', realAdmin = false, realSup = false, eAtl = false, USR = [], P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', editId = '', SEN = [], loginMsg = '', IMP = {rows: [], erros: [], res: [], busy: false}, recovery = false, invite = (ENTRADA === 'invite'), aviso = '';
 var HR = [], previa = null, editRb = '', rbRasc = null;
 var MES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 function dig(t){ return String(t == null ? '' : t).replace(/\D/g, ''); }
@@ -235,6 +235,23 @@ function historicoReembolso(r, hr){
   return h + '</details>';
 }
 
+function distanciasProva(p){
+  return ((p && p.prova_distancias) || []).slice().sort(function(a, b){return (a.ordem || 0) - (b.ordem || 0)});
+}
+function listaTendaHtml(p, parts){
+  var h = '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Lista da tenda - ' + esc(p.nome) + '</title><style>body{font-family:Arial,sans-serif;margin:24px;color:#000}h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:20px 0 6px}p{margin:0}table{border-collapse:collapse;width:100%}th,td{border:1px solid #444;padding:6px 8px;text-align:left;font-size:14px}th:first-child,td:first-child{width:48px;text-align:center}td.as{width:40%;height:28px}</style></head><body>';
+  h += '<h1>' + esc(p.nome) + '</h1><p>' + esc(br(p.data) + (p.local ? ' - ' + p.local : '')) + '</p>';
+  distanciasProva(p).forEach(function(d){
+    var nomes = (parts || []).filter(function(x){return x.distancia_id === d.id}).map(function(x){return (x.perfis && x.perfis.nome) || 'Sem nome'}).sort(function(a, b){return a.localeCompare(b, 'pt-BR')});
+    h += '<h2>' + esc(d.rotulo) + '</h2>';
+    if (!nomes.length) { h += '<p>Nenhum atleta marcado</p>'; return; }
+    h += '<table><thead><tr><th>Nº</th><th>Nome</th><th>Assinatura</th></tr></thead><tbody>';
+    nomes.forEach(function(n, i){ h += '<tr><td>' + (i + 1) + '</td><td>' + esc(n) + '</td><td class="as"></td></tr>'; });
+    h += '</tbody></table>';
+  });
+  return h + '<script>window.onload=function(){window.print()}<\/script></body></html>';
+}
+
 /* ---------- Telas ---------- */
 function reembProva(p){
   if (!admin) return '';
@@ -249,16 +266,40 @@ function reembProva(p){
   });
   return h + '</details>';
 }
+function provaDist(p){
+  var ds = distanciasProva(p), h = '';
+  if (ds.length || p.tem_lista_presenca) {
+    h += '<div style="margin-top:4px">';
+    ds.forEach(function(d){ h += '<span class="tag">' + esc(d.rotulo) + '</span> '; });
+    if (p.tem_lista_presenca) h += '<span class="tag w">Lista de presença</span>';
+    h += '</div>';
+  }
+  if (!p.tem_lista_presenca || !ds.length) return h;
+  var mine = PART.filter(function(x){return x.prova_id === p.id && x.atleta_id === me.id})[0];
+  if (eAtl && days(p.data) >= 0) {
+    if (mine) {
+      var dm = ds.filter(function(d){return d.id === mine.distancia_id})[0];
+      h += '<div style="margin-top:6px"><small>Marcado: ' + esc(dm ? dm.rotulo : '—') + '</small> <button class="btn s x" data-vs="' + esc(p.id) + '">Sair</button></div>';
+    } else {
+      h += '<div style="margin-top:6px"><select class="dsel" aria-label="Distância">' + ds.map(function(d){return '<option value="' + esc(d.id) + '">' + esc(d.rotulo) + '</option>'}).join('') + '</select> <button class="btn s g" data-vc="' + esc(p.id) + '">Vou correr</button></div>';
+    }
+  }
+  if (admin) {
+    var n = PART.filter(function(x){return x.prova_id === p.id}).length;
+    h += '<div style="margin-top:6px"><small>' + n + ' marcado(s)</small> <button class="btn s x" data-lt="' + esc(p.id) + '">Lista da tenda</button></div>';
+  }
+  return h;
+}
 function viewCal(){
   var h = '<h2>Calendário de provas</h2>';
-  if (admin) h += '<form id="f"><label>Prova<input name="n" required></label><label>Data<input type="date" name="d" required></label><label>Local<input name="l"></label><label>Distância<input name="k" placeholder="10 km"></label><label>Inscrição até<input type="date" name="i"></label><label>Valor da inscrição (R$)<input type="number" name="v" step="0.01" min="0"></label><label>Link de inscrição<input type="url" name="u" placeholder="https://..." pattern="https?://.+"></label><button class="btn">Adicionar prova</button></form>';
+  if (admin) h += '<form id="f"><label>Prova<input name="n" required></label><label>Data<input type="date" name="d" required></label><label>Local<input name="l"></label><label>Distâncias (separadas por vírgula)<input name="k" placeholder="5 km, 10 km"></label><label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="lp" style="width:auto"> Tem lista de presença</label><label>Inscrição até<input type="date" name="i"></label><label>Valor da inscrição (R$)<input type="number" name="v" step="0.01" min="0"></label><label>Link de inscrição<input type="url" name="u" placeholder="https://..." pattern="https?://.+"></label><button class="btn">Adicionar prova</button></form>';
   var m = '';
   if (!P.length) h += '<p class="empty">Nenhuma prova cadastrada' + (admin ? '. Adicione a primeira acima.' : ' ainda.') + '</p>';
   P.forEach(function(p){
     var ym = p.data.slice(0,7);
     if (ym !== m) { m = ym; h += '<div class="mes">' + MES[+ym.slice(5)-1] + ' de ' + ym.slice(0,4) + '</div>'; }
     var n = days(p.data), ins = p.inscricao_ate ? (days(p.inscricao_ate) < 0 ? 'Inscrições encerradas' : 'Inscrição até ' + br(p.inscricao_ate)) : '';
-    h += '<div class="item"><div class="date">' + p.data.slice(8) + '<small>' + MES[+p.data.slice(5,7)-1].slice(0,3) + '</small></div><div class="info"><b>' + esc(p.nome) + '</b><small>' + esc([p.local, p.distancia, ins].filter(Boolean).join(' • ')) + '</small></div>' + (n < 0 ? '<span class="tag">Realizada</span>' : '<span class="tag ' + (n <= 14 ? 'w' : '') + '">' + (n == 0 ? 'Hoje' : 'em ' + n + ' d') + '</span>') + (n >= 0 && p.link_inscricao && /^https?:\/\//i.test(p.link_inscricao) ? '<a class="btn s" href="' + esc(p.link_inscricao) + '" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:inline-block">Inscrever-se</a>' : '') + (admin ? '<button class="btn s x" data-lk="' + esc(p.id) + '">Link</button><button class="btn s x" data-delp="' + esc(p.id) + '">Excluir</button>' : '') + reembProva(p) + '</div>';
+    h += '<div class="item"><div class="date">' + p.data.slice(8) + '<small>' + MES[+p.data.slice(5,7)-1].slice(0,3) + '</small></div><div class="info"><b>' + esc(p.nome) + '</b><small>' + esc([p.local, ins].filter(Boolean).join(' • ')) + '</small>' + provaDist(p) + '</div>' + (n < 0 ? '<span class="tag">Realizada</span>' : '<span class="tag ' + (n <= 14 ? 'w' : '') + '">' + (n == 0 ? 'Hoje' : 'em ' + n + ' d') + '</span>') + (n >= 0 && p.link_inscricao && /^https?:\/\//i.test(p.link_inscricao) ? '<a class="btn s" href="' + esc(p.link_inscricao) + '" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:inline-block">Inscrever-se</a>' : '') + (admin ? '<button class="btn s x" data-lk="' + esc(p.id) + '">Link</button><button class="btn s x" data-delp="' + esc(p.id) + '">Excluir</button>' : '') + reembProva(p) + '</div>';
   });
   return h;
 }
@@ -425,16 +466,17 @@ async function refresh(){
   if (prof.status && prof.status !== 'ativo') { loginMsg = prof.status === 'bloqueado' ? 'Conta bloqueada. Procure um administrador.' : 'Conta inativa. Procure a gestão da equipe.'; await sb.auth.signOut(); return; }
   admin = prof.papel === 'gestao' || prof.papel === 'admin'; sup = prof.papel === 'admin'; realAdmin = admin; realSup = sup;
   var a = await Promise.all([
-    sb.from('provas').select('*').order('data'),
+    sb.from('provas').select('*, prova_distancias(id,rotulo,ordem)').order('data'),
     sb.from('reembolsos').select('*, perfis(nome), provas(nome)').order('criado_em', {ascending: false}),
     admin ? sb.from('perfis').select('*').eq('atleta', true) : Promise.resolve({data: []}),
     sb.from('reembolso_historico').select('*').order('alterado_em'),
     sb.from('renovacoes').select('*, perfis(nome)').order('criado_em', {ascending: false}),
     sup ? sb.from('perfis').select('*').order('nome') : Promise.resolve({data: []}),
-    sup ? sb.from('solicitacoes_senha').select('*, perfis(nome,status)').order('criado_em', {ascending: false}).limit(100) : Promise.resolve({data: []})
+    sup ? sb.from('solicitacoes_senha').select('*, perfis(nome,status)').order('criado_em', {ascending: false}).limit(100) : Promise.resolve({data: []}),
+    sb.from('prova_participantes').select(admin ? '*, perfis(nome)' : '*')
   ]);
   for (var i = 0; i < a.length; i++) if (a[i].error) return fail(a[i].error);
-  P = a[0].data; R = a[1].data; ATL = a[2].data; HR = a[3].data; REN = a[4].data; USR = a[5].data; SEN = a[6].data; render();
+  P = a[0].data; R = a[1].data; ATL = a[2].data; HR = a[3].data; REN = a[4].data; USR = a[5].data; SEN = a[6].data; PART = a[7].data || []; render();
 }
 function render(){
   admin = realAdmin; sup = realSup; eAtl = !!prof.atleta;
@@ -466,7 +508,12 @@ function render(){
   }
   if (f) f.onsubmit = async function(e){
     e.preventDefault(); if (sim) return alert(MSGSIM); var d = new FormData(f), r;
-    if (tab == 'cal') r = await sb.from('provas').insert({nome: d.get('n'), data: d.get('d'), local: d.get('l'), distancia: d.get('k'), inscricao_ate: d.get('i') || null, link_inscricao: d.get('u') || null, valor_inscricao: d.get('v') === '' ? null : Number(d.get('v'))});
+    if (tab == 'cal') {
+      var rots = String(d.get('k') || '').split(',').map(function(x){return x.trim()}).filter(Boolean), lp = !!d.get('lp');
+      if (lp && !rots.length) return alert('Cadastre ao menos uma distância para usar a lista de presença.');
+      r = await sb.from('provas').insert({nome: d.get('n'), data: d.get('d'), local: d.get('l'), inscricao_ate: d.get('i') || null, link_inscricao: d.get('u') || null, valor_inscricao: d.get('v') === '' ? null : Number(d.get('v')), tem_lista_presenca: lp}).select('id').single();
+      if (!r.error && rots.length) r = await sb.from('prova_distancias').insert(rots.map(function(x, i){return {prova_id: r.data.id, rotulo: x, ordem: i}}));
+    }
     if (tab == 'ath' || tab == 'conta') {
       var cd = lerCadastro(d, tab == 'ath' || realAdmin);
       if (cd.erro) return alert(cd.erro);
@@ -523,9 +570,19 @@ document.addEventListener('click', async function(e){
   if (b.dataset.impdl) { baixar('resultado_convites.csv', 'email;status;detalhe\n' + IMP.res.map(function(x){return [x.email, x.status, '"' + String(x.detalhe || '').replace(/"/g, '""') + '"'].join(';')}).join('\n')); return; }
   if (b.dataset.impgo) { await enviarLote(); return; }
   if (b.dataset.pdf) { await abrirAnexo(b.dataset.pdf); return; }
-  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.st || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn || b.dataset.rbok || b.dataset.rv)) { alert(MSGSIM); return; }
+  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.st || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn || b.dataset.rbok || b.dataset.rv || b.dataset.vc || b.dataset.vs)) { alert(MSGSIM); return; }
+  if (b.dataset.lt) {
+    var pl = P.filter(function(x){return x.id === b.dataset.lt})[0];
+    if (pl) { var url = URL.createObjectURL(new Blob([listaTendaHtml(pl, PART.filter(function(x){return x.prova_id === pl.id}))], {type: 'text/html'})); window.open(url, '_blank'); }
+    return;
+  }
   var r;
-  if (b.dataset.delp) { if (!confirm('Excluir esta prova?')) return; r = await sb.from('provas').delete().eq('id', b.dataset.delp); }
+  if (b.dataset.vc) {
+    var sel = b.closest('.info').querySelector('select.dsel');
+    r = await sb.from('prova_participantes').upsert({prova_id: b.dataset.vc, atleta_id: me.id, distancia_id: sel.value}, {onConflict: 'prova_id,atleta_id'});
+  }
+  else if (b.dataset.vs) { r = await sb.from('prova_participantes').delete().eq('prova_id', b.dataset.vs).eq('atleta_id', me.id); }
+  else if (b.dataset.delp) { if (!confirm('Excluir esta prova?')) return; r = await sb.from('provas').delete().eq('id', b.dataset.delp); }
   else if (b.dataset.st) {
     var p = b.dataset.st.split('|'), u = {status: p[0]};
     if (p[0] === 'recusado') { u.motivo_decisao = (prompt('Motivo da recusa (obrigatório):') || '').trim(); if (!u.motivo_decisao) return; }
