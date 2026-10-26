@@ -200,6 +200,12 @@ function showAuth(){
   };
 }
 
+/* ---------- Funções puras ---------- */
+function datasRenovacao(x){
+  if (!x || !x.emitido_em) return '';
+  return 'Emitido em ' + br(x.emitido_em) + (x.pago_em ? ' • Pago em ' + br(x.pago_em) : '');
+}
+
 /* ---------- Telas ---------- */
 function reembProva(p){
   if (!admin) return '';
@@ -248,7 +254,7 @@ function viewMine(){
   if (!mine.length) h += '<p class="empty">Nenhuma solicitação de renovação.</p>';
   mine.forEach(function(x){
     var c = x.status == 'recusada' || x.status == 'cancelada' ? 'b' : x.status == 'pendente' ? 'w' : '';
-    h += '<div class="item"><div class="info"><b>' + (x.tipo == 'atestado' ? 'Atestado' : 'Anuidade') + ' até ' + br(x.nova_validade) + '</b><small>Solicitada em ' + br(x.criado_em.slice(0,10)) + (x.status == 'recusada' && x.motivo_decisao ? ' • Motivo: ' + esc(x.motivo_decisao) : '') + '</small></div><span class="tag ' + c + '">' + RTL[x.status] + '</span>' + (x.anexo_path || x.status == 'pendente' ? '<div class="acts">' + pdfBtn(x) + (x.status == 'pendente' ? '<button class="btn s x" data-rn="cancelada|' + x.id + '">Cancelar</button>' : '') + '</div>' : '') + '</div>';
+    h += '<div class="item"><div class="info"><b>' + (x.tipo == 'atestado' ? 'Atestado' : 'Anuidade') + ' até ' + br(x.nova_validade) + '</b><small>Solicitada em ' + br(x.criado_em.slice(0,10)) + (x.status == 'recusada' && x.motivo_decisao ? ' • Motivo: ' + esc(x.motivo_decisao) : '') + (x.status == 'aprovada' && datasRenovacao(x) ? ' • ' + esc(datasRenovacao(x)) : '') + '</small></div><span class="tag ' + c + '">' + RTL[x.status] + '</span>' + (x.anexo_path || x.status == 'pendente' ? '<div class="acts">' + pdfBtn(x) + (x.status == 'pendente' ? '<button class="btn s x" data-rn="cancelada|' + x.id + '">Cancelar</button>' : '') + '</div>' : '') + '</div>';
   });
   return h;
 }
@@ -263,7 +269,7 @@ function viewRen(){
   if (done.length) h += '<div class="mes">Últimas decisões</div>';
   done.forEach(function(x){
     var c = x.status == 'aprovada' ? '' : 'b';
-    h += '<div class="item"><div class="info"><b>' + esc(x.perfis && x.perfis.nome || 'Sem nome') + ' · ' + (x.tipo == 'atestado' ? 'Atestado' : 'Anuidade') + ' até ' + br(x.nova_validade) + '</b><small>' + (x.motivo_decisao ? 'Motivo: ' + esc(x.motivo_decisao) : '') + '</small></div><span class="tag ' + c + '">' + RTL[x.status] + '</span>' + (x.anexo_path ? '<div class="acts">' + pdfBtn(x) + '</div>' : '') + '</div>';
+    h += '<div class="item"><div class="info"><b>' + esc(x.perfis && x.perfis.nome || 'Sem nome') + ' · ' + (x.tipo == 'atestado' ? 'Atestado' : 'Anuidade') + ' até ' + br(x.nova_validade) + '</b><small>' + (x.motivo_decisao ? 'Motivo: ' + esc(x.motivo_decisao) : '') + (x.status == 'aprovada' ? esc(datasRenovacao(x)) : '') + '</small></div><span class="tag ' + c + '">' + RTL[x.status] + '</span>' + (x.anexo_path || x.status == 'aprovada' ? '<div class="acts">' + pdfBtn(x) + (x.status == 'aprovada' && x.atleta_id !== me.id ? '<button class="btn s" data-em="' + x.id + '">Corrigir emissão</button>' : '') + '</div>' : '') + '</div>';
   });
   return h;
 }
@@ -472,7 +478,7 @@ document.addEventListener('click', async function(e){
   if (b.dataset.impdl) { baixar('resultado_convites.csv', 'email;status;detalhe\n' + IMP.res.map(function(x){return [x.email, x.status, '"' + String(x.detalhe || '').replace(/"/g, '""') + '"'].join(';')}).join('\n')); return; }
   if (b.dataset.impgo) { await enviarLote(); return; }
   if (b.dataset.pdf) { await abrirAnexo(b.dataset.pdf); return; }
-  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.st || b.dataset.rn || b.dataset.pp || b.dataset.sn)) { alert(MSGSIM); return; }
+  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.st || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn)) { alert(MSGSIM); return; }
   var r;
   if (b.dataset.delp) { if (!confirm('Excluir esta prova?')) return; r = await sb.from('provas').delete().eq('id', b.dataset.delp); }
   else if (b.dataset.st) {
@@ -513,8 +519,31 @@ document.addEventListener('click', async function(e){
   else if (b.dataset.rn) {
     var q = b.dataset.rn.split('|'), w = {status: q[0]};
     if (q[0] === 'recusada') { w.motivo_decisao = (prompt('Motivo da recusa (obrigatório):') || '').trim(); if (!w.motivo_decisao) return; }
-    else if (q[0] === 'aprovada' && !confirm('Confirma que o comprovante foi conferido? A nova validade passa a valer.')) return;
+    else if (q[0] === 'aprovada') {
+      var rx = REN.filter(function(y){return y.id === q[1]})[0], ea = prompt('Data de emissão do comprovante (dd/mm/aaaa) — obrigatória:');
+      if (ea === null) return;
+      var pe = parseData(ea);
+      if (pe.erro || !pe.v) { alert(pe.erro ? 'Data de emissão inválida.' : 'Informe a data de emissão.'); return; }
+      if (pe.v > today()) { alert('A data de emissão não pode ser futura.'); return; }
+      w.emitido_em = pe.v;
+      if (rx && rx.tipo == 'anuidade') {
+        var pg = prompt('Data de pagamento da anuidade (dd/mm/aaaa) — opcional, deixe em branco se não houver:');
+        if (pg === null) return;
+        var pp2 = parseData(pg);
+        if (pp2.erro) { alert('Data de pagamento inválida.'); return; }
+        if (pp2.v > today()) { alert('A data de pagamento não pode ser futura.'); return; }
+        if (pp2.v) w.pago_em = pp2.v;
+      }
+    }
     r = await sb.from('renovacoes').update(w).eq('id', q[1]);
+  }
+  else if (b.dataset.em) {
+    var ne = prompt('Nova data de emissão (dd/mm/aaaa):');
+    if (ne === null) return;
+    var pn = parseData(ne);
+    if (pn.erro || !pn.v) { alert('Data de emissão inválida.'); return; }
+    if (pn.v > today()) { alert('A data de emissão não pode ser futura.'); return; }
+    r = await sb.rpc('editar_emissao_renovacao', {p_id: b.dataset.em, p_emissao: pn.v});
   }
   else return;
   if (r.error) return fail(r.error);

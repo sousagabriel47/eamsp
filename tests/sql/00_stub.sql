@@ -46,3 +46,6 @@ as $$ select string_to_array(name, '/') $$;
 grant select, insert, update, delete on storage.objects to authenticated;
 grant select on storage.buckets to authenticated;
 grant select on auth.users to authenticated;
+
+-- Supabase concede select/insert por padrão em public; updates ficam por coluna (schema.sql).
+alter default privileges in schema public grant select, insert, delete on tables to authenticated;
