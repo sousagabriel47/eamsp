@@ -207,3 +207,73 @@ create policy historico_dono on public.reembolso_historico for select to authent
   using (exists (select 1 from public.reembolsos r
                  where r.id = reembolso_id and r.atleta_id = (select auth.uid()) and public.is_ativo()));
 revoke insert, update, delete on public.reembolso_historico from authenticated;
+
+-- V2.3) CALENDÁRIO: distâncias por prova, participantes e lista de presença --------------
+alter table public.provas add column if not exists tem_lista_presenca boolean not null default false;
+
+create table if not exists public.prova_distancias (
+  id        uuid primary key default gen_random_uuid(),
+  prova_id  uuid not null references public.provas (id) on delete cascade,
+  rotulo    text not null check (btrim(rotulo) <> ''),
+  ordem     int not null default 0,
+  unique (id, prova_id)
+);
+create table if not exists public.prova_participantes (
+  prova_id      uuid not null references public.provas (id) on delete cascade,
+  atleta_id     uuid not null references public.perfis (id) on delete cascade,
+  distancia_id  uuid not null,
+  criado_em     timestamptz not null default now(),
+  primary key (prova_id, atleta_id),
+  foreign key (distancia_id, prova_id) references public.prova_distancias (id, prova_id) on delete cascade
+);
+
+revoke all on public.prova_distancias from anon;
+revoke all on public.prova_participantes from anon;
+alter table public.prova_distancias enable row level security;
+alter table public.prova_participantes enable row level security;
+
+-- Distâncias: todos os ativos leem; só a gestão escreve
+drop policy if exists prova_distancias_ver on public.prova_distancias;
+create policy prova_distancias_ver on public.prova_distancias for select to authenticated
+  using (public.is_ativo());
+drop policy if exists prova_distancias_gestao_inserir on public.prova_distancias;
+create policy prova_distancias_gestao_inserir on public.prova_distancias for insert to authenticated
+  with check (public.is_gestao());
+drop policy if exists prova_distancias_gestao_alterar on public.prova_distancias;
+create policy prova_distancias_gestao_alterar on public.prova_distancias for update to authenticated
+  using (public.is_gestao()) with check (public.is_gestao());
+drop policy if exists prova_distancias_gestao_apagar on public.prova_distancias;
+create policy prova_distancias_gestao_apagar on public.prova_distancias for delete to authenticated
+  using (public.is_gestao());
+revoke all on public.prova_distancias from authenticated;
+grant select, insert, update, delete on public.prova_distancias to authenticated;
+
+-- Participantes: leitura da própria linha ou gestão; o atleta escreve só a própria linha,
+-- só em prova que ainda não passou (vale para insert, troca de distância e remoção).
+-- A distância pertencer à prova é garantido pela FK composta.
+drop policy if exists prova_participantes_ver on public.prova_participantes;
+create policy prova_participantes_ver on public.prova_participantes for select to authenticated
+  using (atleta_id = (select auth.uid()) or public.is_gestao());
+drop policy if exists prova_participantes_inserir on public.prova_participantes;
+create policy prova_participantes_inserir on public.prova_participantes for insert to authenticated
+  with check (atleta_id = (select auth.uid()) and public.is_atleta()
+    and exists (select 1 from public.provas p where p.id = prova_id and p.data >= current_date));
+drop policy if exists prova_participantes_alterar on public.prova_participantes;
+create policy prova_participantes_alterar on public.prova_participantes for update to authenticated
+  using (atleta_id = (select auth.uid()) and public.is_atleta()
+    and exists (select 1 from public.provas p where p.id = prova_id and p.data >= current_date))
+  with check (atleta_id = (select auth.uid()) and public.is_atleta()
+    and exists (select 1 from public.provas p where p.id = prova_id and p.data >= current_date));
+drop policy if exists prova_participantes_apagar on public.prova_participantes;
+create policy prova_participantes_apagar on public.prova_participantes for delete to authenticated
+  using (atleta_id = (select auth.uid()) and public.is_atleta()
+    and exists (select 1 from public.provas p where p.id = prova_id and p.data >= current_date));
+revoke all on public.prova_participantes from authenticated;
+grant select, insert, delete on public.prova_participantes to authenticated;
+grant update (distancia_id) on public.prova_participantes to authenticated;
+
+-- Migração de dados: texto antigo de provas.distancia vira uma distância
+insert into public.prova_distancias (prova_id, rotulo)
+select p.id, btrim(p.distancia) from public.provas p
+where coalesce(btrim(p.distancia), '') <> ''
+  and not exists (select 1 from public.prova_distancias d where d.prova_id = p.id);
