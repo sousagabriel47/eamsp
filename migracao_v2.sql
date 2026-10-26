@@ -21,6 +21,20 @@ drop policy if exists emissao_historico_gestao on public.renovacao_emissao_histo
 create policy emissao_historico_gestao on public.renovacao_emissao_historico
   for select to authenticated using (public.is_gestao());
 
+-- Criação: mantém a regra de validade e ignora datas vindas do cliente (só a gestão as informa, na aprovação)
+create or replace function public.validar_renovacao_nova() returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if new.nova_validade <= current_date or new.nova_validade > current_date + interval '2 years' then
+    raise exception 'Informe uma validade futura, de até 2 anos.';
+  end if;
+  new.emitido_em := null;
+  new.pago_em := null;
+  return new;
+end;
+$$;
+
 -- Gatilho de decisão: mantém as regras anteriores e acrescenta as datas.
 create or replace function public.decidir_renovacao() returns trigger
 language plpgsql security definer set search_path = ''
@@ -177,7 +191,10 @@ begin
       new.decidido_em  := now();
     end if;
   end if;
-  if not reenvio and (new.prova_id is distinct from old.prova_id
+  -- a prova apagada zera prova_id pela FK (on delete set null): isso não é edição do pedido
+  if not reenvio and ((new.prova_id is distinct from old.prova_id
+                       and not (new.prova_id is null
+                                and not exists (select 1 from public.provas p where p.id = old.prova_id)))
                    or new.descricao is distinct from old.descricao
                    or new.valor is distinct from old.valor
                    or new.anexo_path is distinct from old.anexo_path) then
@@ -197,7 +214,7 @@ $$;
 -- O dono reenvia o próprio pedido recusado (o gatilho exige ser o dono e limpa a decisão)
 drop policy if exists reembolsos_atleta_reenviar on public.reembolsos;
 create policy reembolsos_atleta_reenviar on public.reembolsos for update to authenticated
-  using (atleta_id = (select auth.uid()) and status = 'recusado' and public.is_ativo())
+  using (atleta_id = (select auth.uid()) and status = 'recusado' and public.is_ativo() and public.is_atleta())
   with check (atleta_id = (select auth.uid()) and status = 'pendente');
 
 revoke update on public.reembolsos from authenticated;
@@ -259,17 +276,17 @@ create policy prova_participantes_ver on public.prova_participantes for select t
 drop policy if exists prova_participantes_inserir on public.prova_participantes;
 create policy prova_participantes_inserir on public.prova_participantes for insert to authenticated
   with check (atleta_id = (select auth.uid()) and public.is_atleta()
-    and exists (select 1 from public.provas p where p.id = prova_id and p.data >= current_date));
+    and exists (select 1 from public.provas p where p.id = prova_id and p.data >= (now() at time zone 'America/Sao_Paulo')::date));
 drop policy if exists prova_participantes_alterar on public.prova_participantes;
 create policy prova_participantes_alterar on public.prova_participantes for update to authenticated
   using (atleta_id = (select auth.uid()) and public.is_atleta()
-    and exists (select 1 from public.provas p where p.id = prova_id and p.data >= current_date))
+    and exists (select 1 from public.provas p where p.id = prova_id and p.data >= (now() at time zone 'America/Sao_Paulo')::date))
   with check (atleta_id = (select auth.uid()) and public.is_atleta()
-    and exists (select 1 from public.provas p where p.id = prova_id and p.data >= current_date));
+    and exists (select 1 from public.provas p where p.id = prova_id and p.data >= (now() at time zone 'America/Sao_Paulo')::date));
 drop policy if exists prova_participantes_apagar on public.prova_participantes;
 create policy prova_participantes_apagar on public.prova_participantes for delete to authenticated
   using (atleta_id = (select auth.uid()) and public.is_atleta()
-    and exists (select 1 from public.provas p where p.id = prova_id and p.data >= current_date));
+    and exists (select 1 from public.provas p where p.id = prova_id and p.data >= (now() at time zone 'America/Sao_Paulo')::date));
 revoke all on public.prova_participantes from authenticated;
 grant select, insert, delete on public.prova_participantes to authenticated;
 grant update (distancia_id) on public.prova_participantes to authenticated;
