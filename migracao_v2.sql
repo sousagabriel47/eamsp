@@ -277,3 +277,81 @@ insert into public.prova_distancias (prova_id, rotulo)
 select p.id, btrim(p.distancia) from public.provas p
 where coalesce(btrim(p.distancia), '') <> ''
   and not exists (select 1 from public.prova_distancias d where d.prova_id = p.id);
+
+-- V2.4) AVISOS: notificações de decisão (reembolso e renovação) ---------------------------
+create table if not exists public.avisos (
+  id          bigint generated always as identity primary key,
+  usuario_id  uuid not null references public.perfis (id) on delete cascade,
+  tipo        text not null,
+  texto       text not null,
+  ref_id      uuid,
+  lido_em     timestamptz,
+  criado_em   timestamptz not null default now()
+);
+create index if not exists avisos_usuario_lido_idx on public.avisos (usuario_id, lido_em);
+
+revoke all on public.avisos from anon;
+alter table public.avisos enable row level security;
+drop policy if exists avisos_ver on public.avisos;
+create policy avisos_ver on public.avisos for select to authenticated
+  using (usuario_id = (select auth.uid()));
+drop policy if exists avisos_marcar_lido on public.avisos;
+create policy avisos_marcar_lido on public.avisos for update to authenticated
+  using (usuario_id = (select auth.uid()))
+  with check (usuario_id = (select auth.uid()));
+revoke insert, update, delete on public.avisos from authenticated;
+grant update (lido_em) on public.avisos to authenticated;
+
+-- Só os gatilhos (security definer) criam avisos
+create or replace function public.avisar_decisao_reembolso() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare v text := 'R$ ' || replace(replace(replace(to_char(new.valor, 'FM999,999,990.00'), ',', '#'), '.', ','), '#', '.');
+begin
+  if new.status is not distinct from old.status then
+    return new;
+  end if;
+  if new.status = 'aprovado' then
+    insert into public.avisos (usuario_id, tipo, texto, ref_id)
+    values (new.atleta_id, 'reembolso_aprovado',
+            'Seu pedido de reembolso de ' || v || ' foi aprovado.', new.id);
+  elsif new.status = 'recusado' then
+    insert into public.avisos (usuario_id, tipo, texto, ref_id)
+    values (new.atleta_id, 'reembolso_recusado',
+            'Seu pedido de reembolso de ' || v || ' foi recusado. Motivo: ' || coalesce(new.motivo_decisao, '-'), new.id);
+  elsif new.status = 'pago' then
+    insert into public.avisos (usuario_id, tipo, texto, ref_id)
+    values (new.atleta_id, 'reembolso_pago',
+            'Seu reembolso de ' || v || ' foi pago.', new.id);
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists depois_decidir_reembolso on public.reembolsos;
+create trigger depois_decidir_reembolso after update on public.reembolsos
+  for each row execute function public.avisar_decisao_reembolso();
+
+create or replace function public.avisar_decisao_renovacao() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare d text := to_char(new.nova_validade, 'DD/MM/YYYY');
+begin
+  if new.status is not distinct from old.status then
+    return new;
+  end if;
+  if new.status = 'aprovada' then
+    insert into public.avisos (usuario_id, tipo, texto, ref_id)
+    values (new.atleta_id, 'renovacao_aprovada',
+            'Sua renovação de ' || new.tipo || ' foi aprovada. Nova validade: ' || d || '.', new.id);
+  elsif new.status = 'recusada' then
+    insert into public.avisos (usuario_id, tipo, texto, ref_id)
+    values (new.atleta_id, 'renovacao_recusada',
+            'Sua renovação de ' || new.tipo || ' (validade ' || d || ') foi recusada. Motivo: '
+              || coalesce(new.motivo_decisao, '-'), new.id);
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists depois_decidir_renovacao on public.renovacoes;
+create trigger depois_decidir_renovacao after update on public.renovacoes
+  for each row execute function public.avisar_decisao_renovacao();
