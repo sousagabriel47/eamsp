@@ -112,3 +112,94 @@ grant execute on function public.editar_emissao_renovacao(uuid, date) to authent
 
 revoke update on public.renovacoes from authenticated;
 grant update (status, motivo_decisao, emitido_em, pago_em) on public.renovacoes to authenticated;
+
+-- V2.2) REEMBOLSO: valor da inscrição, reenvio de pedido recusado e histórico ------------
+alter table public.provas add column if not exists valor_inscricao numeric(10,2)
+  check (valor_inscricao is null or valor_inscricao >= 0);
+alter table public.reembolsos add column if not exists valor_prova numeric(10,2);
+alter table public.reembolso_historico add column if not exists motivo text;
+alter table public.reembolso_historico add column if not exists valor numeric(10,2);
+
+-- valor_prova é sempre o da prova escolhida; o que o cliente mandar é ignorado
+create or replace function public.definir_valor_prova() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  new.valor_prova := (select p.valor_inscricao from public.provas p where p.id = new.prova_id);
+  return new;
+end;
+$$;
+drop trigger if exists antes_inserir_reembolso on public.reembolsos;
+create trigger antes_inserir_reembolso before insert on public.reembolsos
+  for each row execute function public.definir_valor_prova();
+
+-- Gatilho de mudança: mantém as regras anteriores e acrescenta o reenvio (recusado -> pendente).
+create or replace function public.registrar_mudanca_reembolso() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare reenvio boolean := false;
+begin
+  new.atualizado_em := now();
+  new.valor_prova := old.valor_prova;
+  if new.status is distinct from old.status then
+    if not ((old.status = 'pendente' and new.status in ('aprovado', 'recusado', 'cancelado'))
+         or (old.status = 'aprovado' and new.status = 'pago')
+         or (old.status = 'recusado' and new.status = 'pendente')) then
+      raise exception 'Mudança de status não permitida: % para %', old.status, new.status;
+    end if;
+    if old.status = 'recusado' and new.status = 'pendente' then
+      if new.atleta_id is distinct from (select auth.uid()) then
+        raise exception 'Só o dono do pedido pode reenviá-lo.';
+      end if;
+      reenvio := true;
+      new.motivo_decisao := null;
+      new.decidido_por := null;
+      new.decidido_em := null;
+      new.valor_prova := (select p.valor_inscricao from public.provas p where p.id = new.prova_id);
+    end if;
+    if new.status in ('aprovado', 'recusado', 'pago') then
+      if not public.is_gestao() then
+        raise exception 'Somente a gestão pode validar reembolsos.';
+      end if;
+      if new.atleta_id = (select auth.uid()) then
+        raise exception 'Você não pode validar o seu próprio reembolso. Peça a outro gestor.';
+      end if;
+      if new.status = 'recusado' and coalesce(btrim(new.motivo_decisao), '') = '' then
+        raise exception 'Informe o motivo da recusa.';
+      end if;
+      new.decidido_por := (select auth.uid());
+      new.decidido_em  := now();
+    end if;
+  end if;
+  if not reenvio and (new.prova_id is distinct from old.prova_id
+                   or new.descricao is distinct from old.descricao
+                   or new.valor is distinct from old.valor
+                   or new.anexo_path is distinct from old.anexo_path) then
+    raise exception 'Só é possível editar um pedido recusado ao reenviá-lo.';
+  end if;
+  if new.status is distinct from old.status then
+    insert into public.reembolso_historico (reembolso_id, status_anterior, status_novo, alterado_por, motivo, valor)
+    values (new.id, old.status, new.status, (select auth.uid()),
+            case when new.status = 'recusado' then new.motivo_decisao end, new.valor);
+  elsif new.motivo_decisao is distinct from old.motivo_decisao then
+    raise exception 'O motivo só pode ser informado junto com a decisão.';
+  end if;
+  return new;
+end;
+$$;
+
+-- O dono reenvia o próprio pedido recusado (o gatilho exige ser o dono e limpa a decisão)
+drop policy if exists reembolsos_atleta_reenviar on public.reembolsos;
+create policy reembolsos_atleta_reenviar on public.reembolsos for update to authenticated
+  using (atleta_id = (select auth.uid()) and status = 'recusado' and public.is_ativo())
+  with check (atleta_id = (select auth.uid()) and status = 'pendente');
+
+revoke update on public.reembolsos from authenticated;
+grant update (status, motivo_decisao, prova_id, descricao, valor, anexo_path) on public.reembolsos to authenticated;
+
+-- O dono também lê o histórico do próprio pedido; ninguém grava pelo cliente (só o gatilho)
+drop policy if exists historico_dono on public.reembolso_historico;
+create policy historico_dono on public.reembolso_historico for select to authenticated
+  using (exists (select 1 from public.reembolsos r
+                 where r.id = reembolso_id and r.atleta_id = (select auth.uid()) and public.is_ativo()));
+revoke insert, update, delete on public.reembolso_historico from authenticated;
