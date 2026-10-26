@@ -274,7 +274,8 @@ function provaDist(p){
     if (p.tem_lista_presenca) h += '<span class="tag w">Lista de presença</span>';
     h += '</div>';
   }
-  if (!p.tem_lista_presenca || !ds.length) return h;
+  if (!p.tem_lista_presenca) return h;
+  if (!ds.length) return h + (admin ? '<div style="margin-top:6px"><small>sem distâncias cadastradas</small></div>' : '');
   var mine = PART.filter(function(x){return x.prova_id === p.id && x.atleta_id === me.id})[0];
   if (eAtl && days(p.data) >= 0) {
     if (mine) {
@@ -512,7 +513,11 @@ function render(){
       var rots = String(d.get('k') || '').split(',').map(function(x){return x.trim()}).filter(Boolean), lp = !!d.get('lp');
       if (lp && !rots.length) return alert('Cadastre ao menos uma distância para usar a lista de presença.');
       r = await sb.from('provas').insert({nome: d.get('n'), data: d.get('d'), local: d.get('l'), inscricao_ate: d.get('i') || null, link_inscricao: d.get('u') || null, valor_inscricao: d.get('v') === '' ? null : Number(d.get('v')), tem_lista_presenca: lp}).select('id').single();
-      if (!r.error && rots.length) r = await sb.from('prova_distancias').insert(rots.map(function(x, i){return {prova_id: r.data.id, rotulo: x, ordem: i}}));
+      if (!r.error && rots.length) {
+        var nid = r.data.id;
+        r = await sb.from('prova_distancias').insert(rots.map(function(x, i){return {prova_id: nid, rotulo: x, ordem: i}}));
+        if (r.error) { try { await sb.from('provas').delete().eq('id', nid); } catch (x) {} }
+      }
     }
     if (tab == 'ath' || tab == 'conta') {
       var cd = lerCadastro(d, tab == 'ath' || realAdmin);
@@ -579,7 +584,7 @@ document.addEventListener('click', async function(e){
   var r;
   if (b.dataset.vc) {
     var sel = b.closest('.info').querySelector('select.dsel');
-    r = await sb.from('prova_participantes').upsert({prova_id: b.dataset.vc, atleta_id: me.id, distancia_id: sel.value}, {onConflict: 'prova_id,atleta_id'});
+    r = await sb.from('prova_participantes').insert({prova_id: b.dataset.vc, atleta_id: me.id, distancia_id: sel.value});
   }
   else if (b.dataset.vs) { r = await sb.from('prova_participantes').delete().eq('prova_id', b.dataset.vs).eq('atleta_id', me.id); }
   else if (b.dataset.delp) { if (!confirm('Excluir esta prova?')) return; r = await sb.from('provas').delete().eq('id', b.dataset.delp); }
