@@ -126,6 +126,10 @@ language plpgsql security definer set search_path = ''
 as $$
 begin
   new.valor_prova := (select p.valor_inscricao from public.provas p where p.id = new.prova_id);
+  -- decisão nunca vem do cliente
+  new.motivo_decisao := null;
+  new.decidido_por := null;
+  new.decidido_em := null;
   return new;
 end;
 $$;

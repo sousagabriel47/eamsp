@@ -103,7 +103,7 @@ end $$;
 
 -- (e) reenviar pago, aprovado e cancelado falha
 do $$
-declare msg text; i int; n int; ids uuid[] := array[
+declare i int; n int; ids uuid[] := array[
   'd0000000-0000-4000-8000-000000000011','d0000000-0000-4000-8000-000000000012','d0000000-0000-4000-8000-000000000013']::uuid[];
 begin
   insert into public.reembolsos (id, atleta_id, descricao, valor, status) values
@@ -113,15 +113,10 @@ begin
   perform set_config('request.jwt.claim.sub', 'e0000000-0000-4000-8000-000000000002', true);
   set local role authenticated;
   for i in 1..3 loop
-    begin
-      -- RLS (sem política para o status) filtra a linha: 0 linhas afetadas, ou o gatilho recusa
-      update public.reembolsos set status = 'pendente', valor = 11 where id = ids[i];
-      get diagnostics n = row_count;
-      assert n = 0, 'e: RLS deveria bloquear ' || i;
-    exception when others then
-      get stacked diagnostics msg = message_text;
-      assert msg not like 'e:%', msg;
-    end;
+    -- sem política de reenvio para esses status: RLS filtra a linha
+    update public.reembolsos set status = 'pendente', valor = 11 where id = ids[i];
+    get diagnostics n = row_count;
+    assert n = 0, 'e: RLS deveria bloquear ' || i;
   end loop;
   reset role;
   assert (select count(*) from public.reembolsos where id = any(ids) and valor = 10
@@ -165,6 +160,41 @@ begin
     insert into public.reembolso_historico (reembolso_id, status_novo) values ('d0000000-0000-4000-8000-000000000001', 'pago');
     assert false, 'g3: deveria falhar';
   exception when insufficient_privilege then null;
+  end;
+  reset role;
+end $$;
+
+-- (h) decisão forjada no insert é zerada
+do $$
+declare r public.reembolsos;
+begin
+  perform set_config('request.jwt.claim.sub', 'e0000000-0000-4000-8000-000000000002', true);
+  set local role authenticated;
+  insert into public.reembolsos (id, atleta_id, descricao, valor, motivo_decisao, decidido_por, decidido_em)
+  values ('d0000000-0000-4000-8000-000000000031', 'e0000000-0000-4000-8000-000000000002', 'forjado', 10,
+          'forjado', 'e0000000-0000-4000-8000-000000000001', now());
+  reset role;
+  select * into r from public.reembolsos where id = 'd0000000-0000-4000-8000-000000000031';
+  assert r.motivo_decisao is null and r.decidido_por is null and r.decidido_em is null, 'h';
+end $$;
+
+-- (i) dono não consegue gravar valor_prova no reenvio
+do $$
+declare msg text;
+begin
+  perform set_config('request.jwt.claim.sub', 'e0000000-0000-4000-8000-000000000001', true);
+  set local role authenticated;
+  update public.reembolsos set status = 'recusado', motivo_decisao = 'x'
+    where id = 'd0000000-0000-4000-8000-000000000001' and status = 'pendente';
+  reset role;
+  perform set_config('request.jwt.claim.sub', 'e0000000-0000-4000-8000-000000000002', true);
+  set local role authenticated;
+  begin
+    update public.reembolsos set status = 'pendente', valor_prova = 1 where id = 'd0000000-0000-4000-8000-000000000001';
+    assert false, 'i: deveria falhar';
+  exception when insufficient_privilege then
+    get stacked diagnostics msg = message_text;
+    assert msg like 'permission denied%', msg;
   end;
   reset role;
 end $$;
