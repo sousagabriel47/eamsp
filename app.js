@@ -490,7 +490,7 @@ function viewReb(){
       } else {
         var er = editRb ? R.filter(function(x){return x.id === editRb})[0] : null;
         if (editRb && !er) editRb = '';
-        h += (er ? '<h2>Reenviar reembolso</h2>' : '') + '<form id="f"><label>Prova<select name="p" onchange="var v=valorProva(this.value);if(v!=null)this.form.v.value=v"><option value="">Sem prova</option>' + opts(P, function(x){return x.nome}) + '</select></label><label>Descrição<input name="t" placeholder="Inscrição, transporte…" required></label><label>Valor (R$)<input type="number" name="v" step="0.01" min="0.01" required></label><label>Comprovante em PDF (até 5 MB)<input type="file" name="c" accept="application/pdf,.pdf"' + (EXIGIR_ANEXO && !(er && er.anexo_path) ? ' required' : '') + '></label><button class="btn">' + (er ? 'Revisar e reenviar' : 'Solicitar reembolso') + '</button>' + (er ? '<button type="button" class="btn s x" data-rbno="1">Cancelar</button>' : '') + '</form>';
+        h += (er ? '<h2>Reenviar reembolso</h2>' : '') + '<form id="f"><label>Prova<select name="p" onchange="var f=this.form.v,v=valorProva(this.value);if(v!=null){f.value=v;f.dataset.auto=v}else if(f.dataset.auto&&f.value===f.dataset.auto){f.value=\'\';f.dataset.auto=\'\'}"><option value="">Sem prova</option>' + opts(P, function(x){return x.nome}) + '</select></label><label>Descrição<input name="t" placeholder="Inscrição, transporte…" required></label><label>Valor (R$)<input type="number" name="v" step="0.01" min="0.01" required></label><label>Comprovante em PDF (até 5 MB)<input type="file" name="c" accept="application/pdf,.pdf"' + (EXIGIR_ANEXO && !(er && er.anexo_path) ? ' required' : '') + '></label><button class="btn">' + (er ? 'Revisar e reenviar' : 'Solicitar reembolso') + '</button>' + (er ? '<button type="button" class="btn s x" data-rbno="1">Cancelar</button>' : '') + '</form>';
       }
     }
   }
@@ -633,7 +633,7 @@ document.addEventListener('click', async function(e){
   if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.ep || b.dataset.st || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn || b.dataset.rbok || b.dataset.rv || b.dataset.vc || b.dataset.vs || b.dataset.lido || b.dataset.lidot !== undefined)) { alert(MSGSIM); return; }
   if (b.dataset.lt) {
     var pl = P.filter(function(x){return x.id === b.dataset.lt})[0];
-    if (pl) { var url = URL.createObjectURL(new Blob([listaTendaHtml(pl, PART.filter(function(x){return x.prova_id === pl.id}))], {type: 'text/html'})); window.open(url, '_blank'); }
+    if (pl) { var url = URL.createObjectURL(new Blob([listaTendaHtml(pl, PART.filter(function(x){return x.prova_id === pl.id}))], {type: 'text/html'})); window.open(url, '_blank'); setTimeout(function(){ URL.revokeObjectURL(url); }, 60000); }
     return;
   }
   var r;
@@ -654,15 +654,19 @@ document.addEventListener('click', async function(e){
   else if (b.dataset.rv) { editRb = b.dataset.rv; previa = null; rbRasc = null; render(); window.scrollTo(0, 0); return; }
   else if (b.dataset.rbok) {
     if (!previa) return;
+    var pv2 = previa;
     b.disabled = true;
     var er3 = editRb ? R.filter(function(x){return x.id === editRb})[0] : null;
-    var an = er3 && er3.anexo_path && !previa.arquivo ? {path: null} : await prepararAnexo(previa.arquivo);
+    var an = er3 && er3.anexo_path && !pv2.arquivo ? {path: null} : await prepararAnexo(pv2.arquivo);
     if (an.err) { b.disabled = false; return alert(an.err); }
-    if (er3) r = await sb.from('reembolsos').update({prova_id: previa.pid || null, descricao: previa.descricao, valor: previa.valor, anexo_path: an.path || er3.anexo_path || null, status: 'pendente'}).eq('id', er3.id);
-    else r = await sb.from('reembolsos').insert({atleta_id: me.id, prova_id: previa.pid || null, descricao: previa.descricao, valor: previa.valor, status: 'pendente', anexo_path: an.path});
+    if (er3) r = await sb.from('reembolsos').update({prova_id: pv2.pid || null, descricao: pv2.descricao, valor: pv2.valor, anexo_path: an.path || er3.anexo_path || null, status: 'pendente'}).eq('id', er3.id);
+    else r = await sb.from('reembolsos').insert({atleta_id: me.id, prova_id: pv2.pid || null, descricao: pv2.descricao, valor: pv2.valor, status: 'pendente', anexo_path: an.path});
     if (r.error && an.path) await sb.storage.from('anexos').remove([an.path]);
     b.disabled = false;
-    if (!r.error) { previa = null; editRb = ''; }
+    if (!r.error) {
+      if (er3 && er3.anexo_path && an.path) await sb.storage.from('anexos').remove([er3.anexo_path]);
+      if (previa === pv2) { previa = null; editRb = ''; }
+    }
   }
   else if (b.dataset.ep) {
     var pe = P.filter(function(x){return x.id === b.dataset.ep})[0];
@@ -671,7 +675,11 @@ document.addEventListener('click', async function(e){
     if (vt === null) return;
     var vl = lerValorInscricao(vt);
     if (!vl.ok) { alert('Informe um valor válido, como 150,00.'); return; }
-    var lpNovo = confirm('Esta prova terá lista de presença?\nSituação atual: ' + (pe.tem_lista_presenca ? 'COM lista' : 'SEM lista') + '.\nOK = com lista; Cancelar = sem lista.');
+    var lpt = prompt('Esta prova terá lista de presença? Responda sim ou não (situação atual: ' + (pe.tem_lista_presenca ? 'sim' : 'não') + '):', pe.tem_lista_presenca ? 'sim' : 'não');
+    if (lpt === null) return;
+    lpt = lpt.trim().toLowerCase();
+    if (['sim', 's', 'não', 'nao', 'n'].indexOf(lpt) < 0) { alert('Responda sim ou não.'); return; }
+    var lpNovo = lpt.charAt(0) === 's';
     var dExist = distanciasProva(pe), dt2 = prompt('Novas distâncias a acrescentar (separadas por vírgula; deixe em branco para não alterar):', '');
     if (dt2 === null) return;
     var dNovas = novasDistancias(dt2, dExist.map(function(x){return x.rotulo}));

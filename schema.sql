@@ -947,6 +947,9 @@ begin
   if p_emissao is null or p_emissao > current_date then
     raise exception 'A data de emissão não pode ser futura.';
   end if;
+  if r.emitido_em is not distinct from p_emissao then
+    return;   -- mesma data: nada a corrigir, nada a registrar
+  end if;
   perform set_config('eamsp.editando_emissao', '1', true);
   update public.renovacoes set emitido_em = p_emissao where id = p_id;
   perform set_config('eamsp.editando_emissao', '', true);
@@ -1149,7 +1152,8 @@ drop policy if exists avisos_marcar_lido on public.avisos;
 create policy avisos_marcar_lido on public.avisos for update to authenticated
   using (usuario_id = (select auth.uid()))
   with check (usuario_id = (select auth.uid()));
-revoke insert, update, delete on public.avisos from authenticated;
+revoke all on public.avisos from authenticated;
+grant select on public.avisos to authenticated;
 grant update (lido_em) on public.avisos to authenticated;
 
 -- Só os gatilhos (security definer) criam avisos
