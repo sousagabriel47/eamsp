@@ -1,7 +1,8 @@
 var HASH = location.hash || '';
 var ENTRADA = /type=invite/.test(HASH) ? 'invite' : /type=signup/.test(HASH) ? 'signup' : /type=recovery/.test(HASH) ? 'recovery' : '';
 var ERRO = /error(_code|_description)?=/.test(HASH);
-var sb, me = null, prof = null, admin = false, sup = false, sim = '', realAdmin = false, realSup = false, eAtl = false, USR = [], P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', editId = '', SEN = [], loginMsg = '', IMP = {rows: [], erros: [], res: [], busy: false}, recovery = false, invite = (ENTRADA === 'invite'), aviso = '';
+var PART = [], sb, me = null, prof = null, admin = false, sup = false, sim = '', realAdmin = false, realSup = false, eAtl = false, USR = [], P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', editId = '', SEN = [], loginMsg = '', IMP = {rows: [], erros: [], res: [], busy: false}, recovery = false, invite = (ENTRADA === 'invite'), aviso = '';
+var AV = [], HR = [], previa = null, editRb = '', rbRasc = null;
 var MES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 function dig(t){ return String(t == null ? '' : t).replace(/\D/g, ''); }
 function cpfValido(c){
@@ -165,7 +166,7 @@ function viewInvite(){
   return '<h2>Aceitar convite</h2><p class="sum">Você foi convidado para o sistema da EAMSP. Informe seu nome e crie uma senha para ativar o acesso.</p><form id="f" style="max-width:420px;grid-template-columns:1fr"><label>Nome completo<input name="n" required autocomplete="name"></label><label>Senha (mínimo 8 caracteres)<input type="password" name="s" required minlength="8" autocomplete="new-password"></label><button class="btn">Ativar acesso</button><p id="msg" class="sum"></p></form>';
 }
 function showAuth(){
-  $('#nav').innerHTML = ''; $('#out').hidden = true; $('#sim').hidden = true; $('#role').textContent = 'Gestão da equipe de corrida';
+  $('#nav').innerHTML = ''; $('#out').hidden = true; $('#sino').hidden = true; $('#sim').hidden = true; $('#role').textContent = 'Gestão da equipe de corrida';
   if (invite && !me) invite = false;
   $('#app').innerHTML = invite ? viewInvite() : recovery ? viewRecovery() : viewAuth();
   if (loginMsg) { msg(loginMsg); loginMsg = ''; }
@@ -200,6 +201,98 @@ function showAuth(){
   };
 }
 
+/* ---------- Funções puras ---------- */
+// Avisos calculados na hora (vencimentos e pendências). 'texto' já é HTML seguro (nomes escapados).
+function avisosCalculados(o){
+  var out = [];
+  function venc(rot, d, nome){
+    var t = st(d); if (!t[1]) return;
+    out.push({sev: t[1], texto: (nome ? esc(nome) + ': ' : '') + rot + ' — ' + t[0].charAt(0).toLowerCase() + t[0].slice(1)});
+  }
+  function alheios(l){return (l || []).filter(function(x){return x.status == 'pendente' && x.atleta_id !== o.meId}).length}
+  if (o.eAtl && o.prof) { venc('Atestado', o.prof.atestado_validade); venc('Anuidade', o.prof.anuidade_ate); }
+  if (o.admin) {
+    var nn = alheios(o.REN), nr = alheios(o.R);
+    if (nn) out.push({sev: '', texto: nn + (nn == 1 ? ' renovação pendente' : ' renovações pendentes')});
+    if (nr) out.push({sev: '', texto: nr + (nr == 1 ? ' reembolso pendente' : ' reembolsos pendentes')});
+    (o.ATL || []).forEach(function(a){
+      if (o.eAtl && a.id === o.meId) return;
+      venc('Atestado', a.atestado_validade, a.nome || 'Sem nome'); venc('Anuidade', a.anuidade_ate, a.nome || 'Sem nome');
+    });
+  }
+  return out;
+}
+function avisosAtuais(){return avisosCalculados({prof: prof, eAtl: eAtl, admin: admin, ATL: ATL, R: R, REN: REN, meId: me && me.id})}
+function totalAvisos(){return avisosAtuais().length + AV.filter(function(x){return !x.lido_em}).length}
+
+function datasRenovacao(x){
+  if (!x || !x.emitido_em) return '';
+  return 'Emitido em ' + br(x.emitido_em) + (x.pago_em ? ' • Pago em ' + br(x.pago_em) : '');
+}
+
+function valorProva(provaId){
+  if (!provaId) return null;
+  var p = P.filter(function(x){return x.id === provaId})[0];
+  return p && p.valor_inscricao != null ? Number(p.valor_inscricao) : null;
+}
+// Valor digitado (vírgula ou ponto): {ok, valor}; vazio = remover (valor null)
+function lerValorInscricao(t){
+  t = String(t == null ? '' : t).trim();
+  if (!t) return {ok: true, valor: null};
+  if (!/^\d+([.,]\d+)?$/.test(t)) return {ok: false, valor: null};
+  var v = Number(t.replace(',', '.'));
+  return isFinite(v) && v >= 0 ? {ok: true, valor: v} : {ok: false, valor: null};
+}
+// Rótulos novos de distância: sem vazios, sem repetidos e sem os que já existem (ignora caixa)
+function novasDistancias(txt, existentes){
+  var vistos = {}, out = [];
+  (existentes || []).forEach(function(x){vistos[String(x).trim().toLowerCase()] = 1});
+  String(txt || '').split(',').forEach(function(x){
+    x = x.trim();
+    if (x && !vistos[x.toLowerCase()]) { vistos[x.toLowerCase()] = 1; out.push(x); }
+  });
+  return out;
+}
+function previaReembolso(d){
+  var h = '<div class="item"><div class="info"><b>Confira antes de enviar</b>';
+  h += '<small>Prova: ' + esc(d.prova || 'Sem prova') + '</small><br><small>Descrição: ' + esc(d.descricao) + '</small>';
+  if (d.valorProva != null) h += '<br><small>Valor da inscrição: ' + esc(money(d.valorProva)) + '</small>';
+  h += '<br><small>Valor solicitado: ' + esc(money(d.valor)) + '</small>';
+  if (d.valorProva != null) {
+    var df = Math.round((d.valor - d.valorProva) * 100) / 100;
+    h += '<br><small>Diferença: ' + (df > 0 ? '+ ' : df < 0 ? '- ' : '') + esc(money(Math.abs(df))) + '</small>';
+  }
+  h += '<br><small>Comprovante: ' + esc(d.anexo || (d.mantido ? 'mantido o comprovante anterior' : 'nenhum')) + '</small></div></div>';
+  return h;
+}
+function historicoReembolso(r, hr){
+  var rows = (hr || []).filter(function(x){return x.reembolso_id === r.id}).sort(function(a, b){return String(a.alterado_em).localeCompare(String(b.alterado_em))});
+  if (!rows.length) return '';
+  var h = '<details style="flex-basis:100%"><summary style="cursor:pointer;color:var(--g);font-weight:600">Histórico (' + rows.length + ')</summary>';
+  rows.forEach(function(x){
+    var quem = x.alterado_por === r.atleta_id ? 'Atleta' : 'Gestão';
+    h += '<div style="font-size:14px;padding:2px 0">' + esc((STL[x.status_anterior] || x.status_anterior || '—') + ' → ' + (STL[x.status_novo] || x.status_novo) + ' · ' + quem + ' · ' + br(String(x.alterado_em).slice(0,10)) + (x.motivo ? ' · Motivo: ' + x.motivo : '')) + '</div>';
+  });
+  return h + '</details>';
+}
+
+function distanciasProva(p){
+  return ((p && p.prova_distancias) || []).slice().sort(function(a, b){return (a.ordem || 0) - (b.ordem || 0)});
+}
+function listaTendaHtml(p, parts){
+  var h = '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Lista da tenda - ' + esc(p.nome) + '</title><style>body{font-family:Arial,sans-serif;margin:24px;color:#000}h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:20px 0 6px}p{margin:0}table{border-collapse:collapse;width:100%}th,td{border:1px solid #444;padding:6px 8px;text-align:left;font-size:14px}th:first-child,td:first-child{width:48px;text-align:center}td.as{width:40%;height:28px}</style></head><body>';
+  h += '<h1>' + esc(p.nome) + '</h1><p>' + esc(br(p.data) + (p.local ? ' - ' + p.local : '')) + '</p>';
+  distanciasProva(p).forEach(function(d){
+    var nomes = (parts || []).filter(function(x){return x.distancia_id === d.id}).map(function(x){return (x.perfis && x.perfis.nome) || 'Sem nome'}).sort(function(a, b){return a.localeCompare(b, 'pt-BR')});
+    h += '<h2>' + esc(d.rotulo) + '</h2>';
+    if (!nomes.length) { h += '<p>Nenhum atleta marcado</p>'; return; }
+    h += '<table><thead><tr><th>Nº</th><th>Nome</th><th>Assinatura</th></tr></thead><tbody>';
+    nomes.forEach(function(n, i){ h += '<tr><td>' + (i + 1) + '</td><td>' + esc(n) + '</td><td class="as"></td></tr>'; });
+    h += '</tbody></table>';
+  });
+  return h + '<script>window.onload=function(){window.print()}<\/script></body></html>';
+}
+
 /* ---------- Telas ---------- */
 function reembProva(p){
   if (!admin) return '';
@@ -214,16 +307,41 @@ function reembProva(p){
   });
   return h + '</details>';
 }
+function provaDist(p){
+  var ds = distanciasProva(p), h = '';
+  if (ds.length || p.tem_lista_presenca) {
+    h += '<div style="margin-top:4px">';
+    ds.forEach(function(d){ h += '<span class="tag">' + esc(d.rotulo) + '</span> '; });
+    if (p.tem_lista_presenca) h += '<span class="tag w">Lista de presença</span>';
+    h += '</div>';
+  }
+  if (!p.tem_lista_presenca) return h;
+  if (!ds.length) return h + (admin ? '<div style="margin-top:6px"><small>sem distâncias cadastradas</small></div>' : '');
+  var mine = PART.filter(function(x){return x.prova_id === p.id && x.atleta_id === me.id})[0];
+  if (eAtl && days(p.data) >= 0) {
+    if (mine) {
+      var dm = ds.filter(function(d){return d.id === mine.distancia_id})[0];
+      h += '<div style="margin-top:6px"><small>Marcado: ' + esc(dm ? dm.rotulo : '—') + '</small> <button class="btn s x" data-vs="' + esc(p.id) + '">Sair</button></div>';
+    } else {
+      h += '<div style="margin-top:6px"><select class="dsel" aria-label="Distância">' + ds.map(function(d){return '<option value="' + esc(d.id) + '">' + esc(d.rotulo) + '</option>'}).join('') + '</select> <button class="btn s g" data-vc="' + esc(p.id) + '">Vou correr</button></div>';
+    }
+  }
+  if (admin) {
+    var n = PART.filter(function(x){return x.prova_id === p.id}).length;
+    h += '<div style="margin-top:6px"><small>' + n + ' marcado(s)</small> <button class="btn s x" data-lt="' + esc(p.id) + '">Lista da tenda</button></div>';
+  }
+  return h;
+}
 function viewCal(){
   var h = '<h2>Calendário de provas</h2>';
-  if (admin) h += '<form id="f"><label>Prova<input name="n" required></label><label>Data<input type="date" name="d" required></label><label>Local<input name="l"></label><label>Distância<input name="k" placeholder="10 km"></label><label>Inscrição até<input type="date" name="i"></label><label>Link de inscrição<input type="url" name="u" placeholder="https://..." pattern="https?://.+"></label><button class="btn">Adicionar prova</button></form>';
+  if (admin) h += '<form id="f"><label>Prova<input name="n" required></label><label>Data<input type="date" name="d" required></label><label>Local<input name="l"></label><label>Distâncias (separadas por vírgula)<input name="k" placeholder="5 km, 10 km"></label><label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="lp" style="width:auto"> Tem lista de presença</label><label>Inscrição até<input type="date" name="i"></label><label>Valor da inscrição (R$)<input type="number" name="v" step="0.01" min="0"></label><label>Link de inscrição<input type="url" name="u" placeholder="https://..." pattern="https?://.+"></label><button class="btn">Adicionar prova</button></form>';
   var m = '';
   if (!P.length) h += '<p class="empty">Nenhuma prova cadastrada' + (admin ? '. Adicione a primeira acima.' : ' ainda.') + '</p>';
   P.forEach(function(p){
     var ym = p.data.slice(0,7);
     if (ym !== m) { m = ym; h += '<div class="mes">' + MES[+ym.slice(5)-1] + ' de ' + ym.slice(0,4) + '</div>'; }
     var n = days(p.data), ins = p.inscricao_ate ? (days(p.inscricao_ate) < 0 ? 'Inscrições encerradas' : 'Inscrição até ' + br(p.inscricao_ate)) : '';
-    h += '<div class="item"><div class="date">' + p.data.slice(8) + '<small>' + MES[+p.data.slice(5,7)-1].slice(0,3) + '</small></div><div class="info"><b>' + esc(p.nome) + '</b><small>' + esc([p.local, p.distancia, ins].filter(Boolean).join(' • ')) + '</small></div>' + (n < 0 ? '<span class="tag">Realizada</span>' : '<span class="tag ' + (n <= 14 ? 'w' : '') + '">' + (n == 0 ? 'Hoje' : 'em ' + n + ' d') + '</span>') + (n >= 0 && p.link_inscricao && /^https?:\/\//i.test(p.link_inscricao) ? '<a class="btn s" href="' + esc(p.link_inscricao) + '" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:inline-block">Inscrever-se</a>' : '') + (admin ? '<button class="btn s x" data-lk="' + esc(p.id) + '">Link</button><button class="btn s x" data-delp="' + esc(p.id) + '">Excluir</button>' : '') + reembProva(p) + '</div>';
+    h += '<div class="item"><div class="date">' + p.data.slice(8) + '<small>' + MES[+p.data.slice(5,7)-1].slice(0,3) + '</small></div><div class="info"><b>' + esc(p.nome) + '</b><small>' + esc([p.local, ins].filter(Boolean).join(' • ')) + '</small>' + provaDist(p) + '</div>' + (n < 0 ? '<span class="tag">Realizada</span>' : '<span class="tag ' + (n <= 14 ? 'w' : '') + '">' + (n == 0 ? 'Hoje' : 'em ' + n + ' d') + '</span>') + (n >= 0 && p.link_inscricao && /^https?:\/\//i.test(p.link_inscricao) ? '<a class="btn s" href="' + esc(p.link_inscricao) + '" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:inline-block">Inscrever-se</a>' : '') + (admin ? '<button class="btn s x" data-ep="' + esc(p.id) + '">Editar</button><button class="btn s x" data-lk="' + esc(p.id) + '">Link</button><button class="btn s x" data-delp="' + esc(p.id) + '">Excluir</button>' : '') + reembProva(p) + '</div>';
   });
   return h;
 }
@@ -248,7 +366,7 @@ function viewMine(){
   if (!mine.length) h += '<p class="empty">Nenhuma solicitação de renovação.</p>';
   mine.forEach(function(x){
     var c = x.status == 'recusada' || x.status == 'cancelada' ? 'b' : x.status == 'pendente' ? 'w' : '';
-    h += '<div class="item"><div class="info"><b>' + (x.tipo == 'atestado' ? 'Atestado' : 'Anuidade') + ' até ' + br(x.nova_validade) + '</b><small>Solicitada em ' + br(x.criado_em.slice(0,10)) + (x.status == 'recusada' && x.motivo_decisao ? ' • Motivo: ' + esc(x.motivo_decisao) : '') + '</small></div><span class="tag ' + c + '">' + RTL[x.status] + '</span>' + (x.anexo_path || x.status == 'pendente' ? '<div class="acts">' + pdfBtn(x) + (x.status == 'pendente' ? '<button class="btn s x" data-rn="cancelada|' + x.id + '">Cancelar</button>' : '') + '</div>' : '') + '</div>';
+    h += '<div class="item"><div class="info"><b>' + (x.tipo == 'atestado' ? 'Atestado' : 'Anuidade') + ' até ' + br(x.nova_validade) + '</b><small>Solicitada em ' + br(x.criado_em.slice(0,10)) + (x.status == 'recusada' && x.motivo_decisao ? ' • Motivo: ' + esc(x.motivo_decisao) : '') + (x.status == 'aprovada' && datasRenovacao(x) ? ' • ' + esc(datasRenovacao(x)) : '') + '</small></div><span class="tag ' + c + '">' + RTL[x.status] + '</span>' + (x.anexo_path || x.status == 'pendente' ? '<div class="acts">' + pdfBtn(x) + (x.status == 'pendente' ? '<button class="btn s x" data-rn="cancelada|' + x.id + '">Cancelar</button>' : '') + '</div>' : '') + '</div>';
   });
   return h;
 }
@@ -263,7 +381,7 @@ function viewRen(){
   if (done.length) h += '<div class="mes">Últimas decisões</div>';
   done.forEach(function(x){
     var c = x.status == 'aprovada' ? '' : 'b';
-    h += '<div class="item"><div class="info"><b>' + esc(x.perfis && x.perfis.nome || 'Sem nome') + ' · ' + (x.tipo == 'atestado' ? 'Atestado' : 'Anuidade') + ' até ' + br(x.nova_validade) + '</b><small>' + (x.motivo_decisao ? 'Motivo: ' + esc(x.motivo_decisao) : '') + '</small></div><span class="tag ' + c + '">' + RTL[x.status] + '</span>' + (x.anexo_path ? '<div class="acts">' + pdfBtn(x) + '</div>' : '') + '</div>';
+    h += '<div class="item"><div class="info"><b>' + esc(x.perfis && x.perfis.nome || 'Sem nome') + ' · ' + (x.tipo == 'atestado' ? 'Atestado' : 'Anuidade') + ' até ' + br(x.nova_validade) + '</b><small>' + (x.motivo_decisao ? 'Motivo: ' + esc(x.motivo_decisao) : '') + (x.status == 'aprovada' ? esc(datasRenovacao(x)) : '') + '</small></div><span class="tag ' + c + '">' + RTL[x.status] + '</span>' + (x.anexo_path || x.status == 'aprovada' ? '<div class="acts">' + pdfBtn(x) + (x.status == 'aprovada' && x.atleta_id !== me.id ? '<button class="btn s" data-em="' + x.id + '">Corrigir emissão</button>' : '') + '</div>' : '') + '</div>';
   });
   return h;
 }
@@ -283,6 +401,18 @@ function usrList(){
   $('#ulist').innerHTML = h;
 }
 function initUsr(){ $('#uq').oninput = usrList; usrList(); }
+function viewAvisos(){
+  var calc = avisosAtuais(), nl = AV.filter(function(x){return !x.lido_em}).length;
+  var h = '<h2>Avisos</h2>';
+  if (!calc.length && !AV.length) return h + '<p class="empty">Nenhum aviso.</p>';
+  calc.forEach(function(x){h += '<div class="al ' + (x.sev == 'b' ? 'bad' : '') + '">' + x.texto + '</div> '});
+  if (AV.length) h += '<h2>Histórico</h2>' + (nl ? '<p><button class="btn s x" data-lidot="1">Marcar todos como lidos</button></p>' : '');
+  AV.forEach(function(x){
+    h += '<div class="item"' + (x.lido_em ? ' style="opacity:.6"' : '') + '><div class="info"><b>' + esc(x.texto) + '</b><small>' + br(String(x.criado_em).slice(0, 10)) + '</small></div>' +
+      (x.lido_em ? '' : '<button class="btn s x" data-lido="' + esc(x.id) + '">Marcar como lido</button>') + '</div>';
+  });
+  return h;
+}
 function viewConta(){
   return '<h2>Minha conta</h2><div class="item"><div class="info"><b>' + esc(prof.nome || 'Sem nome') + '</b><small>' + esc(me.email) + ' · ' + PAP[prof.papel] + ' · ' + STT[prof.status || 'ativo'] + '</small></div></div>' +
     '<h2>Meus dados cadastrais</h2><p class="sum">Mantenha nome, CPF, telefone e data de nascimento atualizados. A data de adesão à equipe é definida pela gestão.</p>' + formCadastro(prof, realAdmin, true) +
@@ -355,7 +485,13 @@ function viewReb(){
   if (eAtl) {
     if (!prof.nome) h += '<p class="empty">Preencha seu nome em "Minha conta" antes de pedir reembolso.</p>';
     else {
-      h += '<form id="f"><label>Prova<select name="p"><option value="">Sem prova</option>' + opts(P, function(x){return x.nome}) + '</select></label><label>Descrição<input name="t" placeholder="Inscrição, transporte…" required></label><label>Valor (R$)<input type="number" name="v" step="0.01" min="0.01" required></label><label>Comprovante em PDF (até 5 MB)<input type="file" name="c" accept="application/pdf,.pdf"' + (EXIGIR_ANEXO ? ' required' : '') + '></label><button class="btn">Solicitar reembolso</button></form>';
+      if (previa) {
+        h += previaReembolso(previa) + '<div class="acts"><button class="btn" data-rbok="1">Confirmar envio</button><button class="btn s x" data-rbno="1">Voltar</button></div>';
+      } else {
+        var er = editRb ? R.filter(function(x){return x.id === editRb})[0] : null;
+        if (editRb && !er) editRb = '';
+        h += (er ? '<h2>Reenviar reembolso</h2>' : '') + '<form id="f"><label>Prova<select name="p" onchange="var f=this.form.v,v=valorProva(this.value);if(v!=null){f.value=v;f.dataset.auto=v}else if(f.dataset.auto&&f.value===f.dataset.auto){f.value=\'\';f.dataset.auto=\'\'}"><option value="">Sem prova</option>' + opts(P, function(x){return x.nome}) + '</select></label><label>Descrição<input name="t" placeholder="Inscrição, transporte…" required></label><label>Valor (R$)<input type="number" name="v" step="0.01" min="0.01" required></label><label>Comprovante em PDF (até 5 MB)<input type="file" name="c" accept="application/pdf,.pdf"' + (EXIGIR_ANEXO && !(er && er.anexo_path) ? ' required' : '') + '></label><button class="btn">' + (er ? 'Revisar e reenviar' : 'Solicitar reembolso') + '</button>' + (er ? '<button type="button" class="btn s x" data-rbno="1">Cancelar</button>' : '') + '</form>';
+      }
     }
   }
   if (admin) {
@@ -368,9 +504,10 @@ function viewReb(){
     var c = r.status == 'recusado' || r.status == 'cancelado' ? 'b' : r.status == 'pendente' ? 'w' : '';
     var nome = r.perfis && r.perfis.nome ? r.perfis.nome : 'Sem nome', own = r.atleta_id === me.id;
     h += '<div class="item"><div class="info"><b>' + (admin ? esc(nome) + (own ? ' (você)' : '') + ' · ' : '') + money(r.valor) + '</b><small>' + esc(r.descricao) + (r.provas ? ' • ' + esc(r.provas.nome) : '') + ' • ' + br(r.criado_em.slice(0,10)) + (r.status == 'recusado' && r.motivo_decisao ? ' • Motivo: ' + esc(r.motivo_decisao) : '') + '</small></div><span class="tag ' + c + '">' + STL[r.status] + '</span><div class="acts">' + pdfBtn(r) +
+      (own && r.status == 'recusado' ? '<button class="btn s g" data-rv="' + esc(r.id) + '">Corrigir e reenviar</button>' : '') +
       (admin && !own && r.status == 'pendente' ? '<button class="btn s g" data-st="aprovado|' + r.id + '">Aprovar</button><button class="btn s x" data-st="recusado|' + r.id + '">Recusar</button>' : '') +
       (admin && !own && r.status == 'aprovado' ? '<button class="btn s g" data-st="pago|' + r.id + '">Marcar como pago</button>' : '') +
-      (own && r.status == 'pendente' ? '<span class="tag w">Aguarda outro gestor</span>' : '') + (own && r.status == 'pendente' ? '<button class="btn s x" data-st="cancelado|' + r.id + '">Cancelar</button>' : '') + '</div></div>';
+      (own && r.status == 'pendente' ? '<span class="tag w">Aguarda outro gestor</span>' : '') + (own && r.status == 'pendente' ? '<button class="btn s x" data-st="cancelado|' + r.id + '">Cancelar</button>' : '') + '</div>' + historicoReembolso(r, HR) + '</div>';
   });
   return h;
 }
@@ -383,15 +520,18 @@ async function refresh(){
   if (prof.status && prof.status !== 'ativo') { loginMsg = prof.status === 'bloqueado' ? 'Conta bloqueada. Procure um administrador.' : 'Conta inativa. Procure a gestão da equipe.'; await sb.auth.signOut(); return; }
   admin = prof.papel === 'gestao' || prof.papel === 'admin'; sup = prof.papel === 'admin'; realAdmin = admin; realSup = sup;
   var a = await Promise.all([
-    sb.from('provas').select('*').order('data'),
+    sb.from('provas').select('*, prova_distancias(id,rotulo,ordem)').order('data'),
     sb.from('reembolsos').select('*, perfis(nome), provas(nome)').order('criado_em', {ascending: false}),
     admin ? sb.from('perfis').select('*').eq('atleta', true) : Promise.resolve({data: []}),
+    sb.from('reembolso_historico').select('*').order('alterado_em'),
     sb.from('renovacoes').select('*, perfis(nome)').order('criado_em', {ascending: false}),
     sup ? sb.from('perfis').select('*').order('nome') : Promise.resolve({data: []}),
-    sup ? sb.from('solicitacoes_senha').select('*, perfis(nome,status)').order('criado_em', {ascending: false}).limit(100) : Promise.resolve({data: []})
+    sup ? sb.from('solicitacoes_senha').select('*, perfis(nome,status)').order('criado_em', {ascending: false}).limit(100) : Promise.resolve({data: []}),
+    sb.from('prova_participantes').select(admin ? '*, perfis(nome)' : '*'),
+    sb.from('avisos').select('*').order('criado_em', {ascending: false}).limit(50)
   ]);
   for (var i = 0; i < a.length; i++) if (a[i].error) return fail(a[i].error);
-  P = a[0].data; R = a[1].data; ATL = a[2].data; REN = a[3].data; USR = a[4].data; SEN = a[5].data; render();
+  P = a[0].data; R = a[1].data; ATL = a[2].data; HR = a[3].data; REN = a[4].data; USR = a[5].data; SEN = a[6].data; PART = a[7].data || []; AV = a[8].data || []; render();
 }
 function render(){
   admin = realAdmin; sup = realSup; eAtl = !!prof.atleta;
@@ -404,18 +544,36 @@ function render(){
   var np = REN.filter(function(x){return x.status == 'pendente'}).length, nr = R.filter(function(x){return x.status == 'pendente'}).length;
   var ns = SEN.filter(function(x){return x.status == 'pendente'}).length;
   var tabs = (admin ? [['cal','Calendário'],['ath','Atletas'],['ren','Renovações' + (np ? ' (' + np + ')' : '')],['reb','Reembolsos' + (nr ? ' (' + nr + ')' : '')]].concat(eAtl ? [['me','Atestado e anuidade']] : []).concat(sup ? [['usr','Usuários'],['sen','Senhas' + (ns ? ' (' + ns + ')' : '')],['imp','Importar CSV']] : []) : [['cal','Calendário'],['me','Atestado e anuidade'],['reb','Reembolsos']]).concat([['conta','Minha conta']]);
-  if (!tabs.some(function(t){return t[0] == tab})) tab = 'cal';
+  if (tab != 'avi' && !tabs.some(function(t){return t[0] == tab})) tab = 'cal';
+  var na = totalAvisos(); $('#sino').hidden = false; $('#sino').textContent = 'Avisos (' + na + ')';
   $('#nav').innerHTML = tabs.map(function(t){return '<button data-t="' + t[0] + '"' + (t[0] == tab ? ' class="on"' : '') + '>' + t[1] + '</button>'}).join('');
   $('#role').textContent = (sim ? 'Simulando a visão de ' + (sim === 'gestao' ? 'gestão' : 'atleta') : realSup ? 'Acesso de administrador' : realAdmin ? 'Acesso de gestão' : 'Acesso de atleta') + (prof.nome ? ' · ' + prof.nome : '');
   $('#out').hidden = false; $('#sim').hidden = !realSup; $('#sim').value = sim;
-  $('#app').innerHTML = (sim ? '<div class="al" role="status">Modo simulação: você está vendo a tela de ' + (sim === 'gestao' ? 'gestão' : 'atleta') + ', somente leitura.</div>' : '') + (aviso ? '<div class="al" role="status" style="border-color:#0B7A64">' + esc(aviso) + '</div>' : '') + ({cal: viewCal, ath: viewAth, me: viewMine, ren: viewRen, reb: viewReb, usr: viewUsr, conta: viewConta, sen: viewSen, imp: viewImp})[tab]();
+  $('#app').innerHTML = (sim ? '<div class="al" role="status">Modo simulação: você está vendo a tela de ' + (sim === 'gestao' ? 'gestão' : 'atleta') + ', somente leitura.</div>' : '') + (aviso ? '<div class="al" role="status" style="border-color:#0B7A64">' + esc(aviso) + '</div>' : '') + ({cal: viewCal, ath: viewAth, me: viewMine, ren: viewRen, reb: viewReb, usr: viewUsr, conta: viewConta, sen: viewSen, imp: viewImp, avi: viewAvisos})[tab]();
   if (tab == 'usr') initUsr();
   if (tab == 'imp') initImp();
   R = _R; REN = _REN;
   var f = $('#f');
+  if (f && tab == 'reb') {
+    var er2 = editRb ? R.filter(function(x){return x.id === editRb})[0] : null, src = rbRasc || (er2 ? {pid: er2.prova_id || '', descricao: er2.descricao, valor: er2.valor} : null);
+    if (src) {
+      f.p.value = src.pid; f.t.value = src.descricao; f.v.value = src.valor;
+      if (src.arquivo) { try { var dt = new DataTransfer(); dt.items.add(src.arquivo); f.c.files = dt.files; } catch (x) {} }
+    }
+    rbRasc = null;
+  }
   if (f) f.onsubmit = async function(e){
     e.preventDefault(); if (sim) return alert(MSGSIM); var d = new FormData(f), r;
-    if (tab == 'cal') r = await sb.from('provas').insert({nome: d.get('n'), data: d.get('d'), local: d.get('l'), distancia: d.get('k'), inscricao_ate: d.get('i') || null, link_inscricao: d.get('u') || null});
+    if (tab == 'cal') {
+      var rots = String(d.get('k') || '').split(',').map(function(x){return x.trim()}).filter(Boolean), lp = !!d.get('lp');
+      if (lp && !rots.length) return alert('Cadastre ao menos uma distância para usar a lista de presença.');
+      r = await sb.from('provas').insert({nome: d.get('n'), data: d.get('d'), local: d.get('l'), inscricao_ate: d.get('i') || null, link_inscricao: d.get('u') || null, valor_inscricao: d.get('v') === '' ? null : Number(d.get('v')), tem_lista_presenca: lp}).select('id').single();
+      if (!r.error && rots.length) {
+        var nid = r.data.id;
+        r = await sb.from('prova_distancias').insert(rots.map(function(x, i){return {prova_id: nid, rotulo: x, ordem: i}}));
+        if (r.error) { try { await sb.from('provas').delete().eq('id', nid); } catch (x) {} }
+      }
+    }
     if (tab == 'ath' || tab == 'conta') {
       var cd = lerCadastro(d, tab == 'ath' || realAdmin);
       if (cd.erro) return alert(cd.erro);
@@ -423,10 +581,9 @@ function render(){
       if (!r.error) { if (tab == 'ath') editId = ''; else aviso = 'Dados salvos.'; }
     }
     if (tab == 'reb') {
-      var an = await prepararAnexo(d.get('c'));
-      if (an.err) return alert(an.err);
-      r = await sb.from('reembolsos').insert({atleta_id: me.id, prova_id: d.get('p') || null, descricao: d.get('t'), valor: Number(d.get('v')), status: 'pendente', anexo_path: an.path});
-      if (r.error && an.path) await sb.storage.from('anexos').remove([an.path]);
+      var pid = d.get('p') || '', pvr = P.filter(function(x){return x.id === pid})[0], fa = d.get('c');
+      previa = {pid: pid, prova: pvr ? pvr.nome : '', descricao: d.get('t'), valor: Number(d.get('v')), valorProva: valorProva(pid), anexo: fa && fa.size ? fa.name : '', mantido: !!(editRb && !(fa && fa.size) && (R.filter(function(x){return x.id === editRb})[0] || {}).anexo_path), arquivo: fa && fa.size ? fa : null};
+      render(); window.scrollTo(0, 0); return;
     }
     if (r && r.error) return fail(r.error);
     refresh();
@@ -465,21 +622,73 @@ document.addEventListener('click', async function(e){
   var b = e.target.closest('button'); if (!b) return;
   if (b.dataset.am) { authMode = b.dataset.am; showAuth(); return; }
   if (b.id === 'out') { await sb.auth.signOut(); return; }
-  if (b.dataset.t) { tab = b.dataset.t; aviso = ''; editId = ''; refresh(); return; }
+  if (b.dataset.t) { tab = b.dataset.t; aviso = ''; editId = ''; editRb = ''; previa = null; rbRasc = null; refresh(); return; }
+  if (b.dataset.rbno) { if (previa) rbRasc = {pid: previa.pid, descricao: previa.descricao, valor: previa.valor, arquivo: previa.arquivo}; else editRb = ''; previa = null; render(); return; }
   if (b.dataset.ed) { editId = b.dataset.ed; render(); window.scrollTo(0, 0); return; }
   if (b.dataset.edc) { editId = ''; render(); return; }
   if (b.dataset.impmod) { baixar('modelo_cadastro.csv', 'nome;email;papel;atleta;cpf;telefone;data_nascimento;data_adesao\nMaria Souza;maria@exemplo.com;atleta;sim;529.982.247-25;(11) 98888-7777;15/03/1990;01/02/2024\nJoão Lima;joao@exemplo.com;gestao;sim;;11977776666;1985-07-20;2023-05-10\n'); return; }
   if (b.dataset.impdl) { baixar('resultado_convites.csv', 'email;status;detalhe\n' + IMP.res.map(function(x){return [x.email, x.status, '"' + String(x.detalhe || '').replace(/"/g, '""') + '"'].join(';')}).join('\n')); return; }
   if (b.dataset.impgo) { await enviarLote(); return; }
   if (b.dataset.pdf) { await abrirAnexo(b.dataset.pdf); return; }
-  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.st || b.dataset.rn || b.dataset.pp || b.dataset.sn)) { alert(MSGSIM); return; }
+  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.ep || b.dataset.st || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn || b.dataset.rbok || b.dataset.rv || b.dataset.vc || b.dataset.vs || b.dataset.lido || b.dataset.lidot !== undefined)) { alert(MSGSIM); return; }
+  if (b.dataset.lt) {
+    var pl = P.filter(function(x){return x.id === b.dataset.lt})[0];
+    if (pl) { var url = URL.createObjectURL(new Blob([listaTendaHtml(pl, PART.filter(function(x){return x.prova_id === pl.id}))], {type: 'text/html'})); window.open(url, '_blank'); setTimeout(function(){ URL.revokeObjectURL(url); }, 60000); }
+    return;
+  }
   var r;
-  if (b.dataset.delp) { if (!confirm('Excluir esta prova?')) return; r = await sb.from('provas').delete().eq('id', b.dataset.delp); }
+  if (b.dataset.vc) {
+    var sel = b.closest('.info').querySelector('select.dsel');
+    r = await sb.from('prova_participantes').insert({prova_id: b.dataset.vc, atleta_id: me.id, distancia_id: sel.value});
+  }
+  else if (b.dataset.lido) { r = await sb.from('avisos').update({lido_em: new Date().toISOString()}).eq('id', b.dataset.lido); }
+  else if (b.dataset.lidot !== undefined) { r = await sb.from('avisos').update({lido_em: new Date().toISOString()}).is('lido_em', null); }
+  else if (b.dataset.vs) { r = await sb.from('prova_participantes').delete().eq('prova_id', b.dataset.vs).eq('atleta_id', me.id); }
+  else if (b.dataset.delp) { if (!confirm('Excluir esta prova?')) return; r = await sb.from('provas').delete().eq('id', b.dataset.delp); }
   else if (b.dataset.st) {
     var p = b.dataset.st.split('|'), u = {status: p[0]};
     if (p[0] === 'recusado') { u.motivo_decisao = (prompt('Motivo da recusa (obrigatório):') || '').trim(); if (!u.motivo_decisao) return; }
     else if (p[0] === 'aprovado' && !confirm('Aprovar este reembolso?')) return;
     r = await sb.from('reembolsos').update(u).eq('id', p[1]);
+  }
+  else if (b.dataset.rv) { editRb = b.dataset.rv; previa = null; rbRasc = null; render(); window.scrollTo(0, 0); return; }
+  else if (b.dataset.rbok) {
+    if (!previa) return;
+    var pv2 = previa;
+    b.disabled = true;
+    var er3 = editRb ? R.filter(function(x){return x.id === editRb})[0] : null;
+    var an = er3 && er3.anexo_path && !pv2.arquivo ? {path: null} : await prepararAnexo(pv2.arquivo);
+    if (an.err) { b.disabled = false; return alert(an.err); }
+    if (er3) r = await sb.from('reembolsos').update({prova_id: pv2.pid || null, descricao: pv2.descricao, valor: pv2.valor, anexo_path: an.path || er3.anexo_path || null, status: 'pendente'}).eq('id', er3.id);
+    else r = await sb.from('reembolsos').insert({atleta_id: me.id, prova_id: pv2.pid || null, descricao: pv2.descricao, valor: pv2.valor, status: 'pendente', anexo_path: an.path});
+    if (r.error && an.path) await sb.storage.from('anexos').remove([an.path]);
+    b.disabled = false;
+    if (!r.error) {
+      if (er3 && er3.anexo_path && an.path) await sb.storage.from('anexos').remove([er3.anexo_path]);
+      if (previa === pv2) { previa = null; editRb = ''; }
+    }
+  }
+  else if (b.dataset.ep) {
+    var pe = P.filter(function(x){return x.id === b.dataset.ep})[0];
+    if (!pe) return;
+    var vt = prompt('Valor da inscrição (R$). Deixe em branco para remover:', pe.valor_inscricao != null ? String(pe.valor_inscricao).replace('.', ',') : '');
+    if (vt === null) return;
+    var vl = lerValorInscricao(vt);
+    if (!vl.ok) { alert('Informe um valor válido, como 150,00.'); return; }
+    var lpt = prompt('Esta prova terá lista de presença? Responda sim ou não (situação atual: ' + (pe.tem_lista_presenca ? 'sim' : 'não') + '):', pe.tem_lista_presenca ? 'sim' : 'não');
+    if (lpt === null) return;
+    lpt = lpt.trim().toLowerCase();
+    if (['sim', 's', 'não', 'nao', 'n'].indexOf(lpt) < 0) { alert('Responda sim ou não.'); return; }
+    var lpNovo = lpt.charAt(0) === 's';
+    var dExist = distanciasProva(pe), dt2 = prompt('Novas distâncias a acrescentar (separadas por vírgula; deixe em branco para não alterar):', '');
+    if (dt2 === null) return;
+    var dNovas = novasDistancias(dt2, dExist.map(function(x){return x.rotulo}));
+    if (lpNovo && !dExist.length && !dNovas.length) { alert('Cadastre ao menos uma distância para usar a lista de presença.'); return; }
+    r = await sb.from('provas').update({valor_inscricao: vl.valor, tem_lista_presenca: lpNovo}).eq('id', pe.id);
+    if (!r.error && dNovas.length) {
+      var ordem0 = dExist.reduce(function(m, x){return Math.max(m, x.ordem || 0)}, -1) + 1;
+      r = await sb.from('prova_distancias').insert(dNovas.map(function(x, i){return {prova_id: pe.id, rotulo: x, ordem: ordem0 + i}}));
+    }
   }
   else if (b.dataset.lk) {
     var pv = P.filter(function(x){return x.id === b.dataset.lk})[0];
@@ -513,8 +722,31 @@ document.addEventListener('click', async function(e){
   else if (b.dataset.rn) {
     var q = b.dataset.rn.split('|'), w = {status: q[0]};
     if (q[0] === 'recusada') { w.motivo_decisao = (prompt('Motivo da recusa (obrigatório):') || '').trim(); if (!w.motivo_decisao) return; }
-    else if (q[0] === 'aprovada' && !confirm('Confirma que o comprovante foi conferido? A nova validade passa a valer.')) return;
+    else if (q[0] === 'aprovada') {
+      var rx = REN.filter(function(y){return y.id === q[1]})[0], ea = prompt('Data de emissão do comprovante (dd/mm/aaaa) — obrigatória:');
+      if (ea === null) return;
+      var pe = parseData(ea);
+      if (pe.erro || !pe.v) { alert(pe.erro ? 'Data de emissão inválida.' : 'Informe a data de emissão.'); return; }
+      if (pe.v > today()) { alert('A data de emissão não pode ser futura.'); return; }
+      w.emitido_em = pe.v;
+      if (rx && rx.tipo == 'anuidade') {
+        var pg = prompt('Data de pagamento da anuidade (dd/mm/aaaa) — opcional, deixe em branco se não houver:');
+        if (pg === null) return;
+        var pp2 = parseData(pg);
+        if (pp2.erro) { alert('Data de pagamento inválida.'); return; }
+        if (pp2.v > today()) { alert('A data de pagamento não pode ser futura.'); return; }
+        if (pp2.v) w.pago_em = pp2.v;
+      }
+    }
     r = await sb.from('renovacoes').update(w).eq('id', q[1]);
+  }
+  else if (b.dataset.em) {
+    var ne = prompt('Nova data de emissão (dd/mm/aaaa):');
+    if (ne === null) return;
+    var pn = parseData(ne);
+    if (pn.erro || !pn.v) { alert('Data de emissão inválida.'); return; }
+    if (pn.v > today()) { alert('A data de emissão não pode ser futura.'); return; }
+    r = await sb.rpc('editar_emissao_renovacao', {p_id: b.dataset.em, p_emissao: pn.v});
   }
   else return;
   if (r.error) return fail(r.error);
