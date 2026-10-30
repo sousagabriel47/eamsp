@@ -1,7 +1,7 @@
 var HASH = location.hash || '';
 var ENTRADA = /type=invite/.test(HASH) ? 'invite' : /type=signup/.test(HASH) ? 'signup' : /type=recovery/.test(HASH) ? 'recovery' : '';
 var ERRO = /error(_code|_description)?=/.test(HASH);
-var PART = [], sb, me = null, prof = null, admin = false, sup = false, sim = '', realAdmin = false, realSup = false, eAtl = false, USR = [], P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', editId = '', SEN = [], loginMsg = '', IMP = {rows: [], erros: [], res: [], busy: false}, recovery = false, invite = (ENTRADA === 'invite'), aviso = '';
+var PART = [], sb, me = null, prof = null, admin = false, sup = false, sim = '', realAdmin = false, realSup = false, eAtl = false, USR = [], P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', editId = '', SEN = [], tabIni = true, loginMsg = '', IMP = {rows: [], erros: [], res: [], busy: false}, recovery = false, invite = (ENTRADA === 'invite'), aviso = '';
 var SEL = {}, LOTE_DATA = '';
 var DASH = null, dashPer = 'mes', DASH_LOADING = false, DASH_ERRO = false, DASH_SEQ = 0, spons = false;
 var AV = [], HR = [], previa = null, editRb = '', rbRasc = null;
@@ -125,7 +125,7 @@ async function abrirAnexo(path){
 function pdfBtn(x){ return x.anexo_path ? '<button class="btn s x" data-pdf="' + esc(x.anexo_path) + '">Ver PDF</button>' : ''; }
 var MSGSIM = 'Modo simulação: as ações estão desativadas. Volte para "Minha visão" para agir.';
 var STT = {ativo:'Ativo', inativo:'Inativo', bloqueado:'Bloqueado'};
-var PAP = {atleta:'Atleta', gestao:'Gestão', admin:'Administrador'};
+var PAP = {atleta:'Atleta', gestao:'Gestão', admin:'Administrador', patrocinador:'Patrocinador'};
 var RTL = {pendente:'Pendente', aprovada:'Aprovada', recusada:'Recusada', cancelada:'Cancelada'};
 var STL = {pendente:'Pendente', aprovado:'Aprovado', pago:'Pago', recusado:'Recusado', cancelado:'Cancelado'};
 function $(s){return document.querySelector(s)}
@@ -168,6 +168,7 @@ function viewInvite(){
   return '<h2>Aceitar convite</h2><p class="sum">Você foi convidado para o sistema da EAMSP. Informe seu nome e crie uma senha para ativar o acesso.</p><form id="f" style="max-width:420px;grid-template-columns:1fr"><label>Nome completo<input name="n" required autocomplete="name"></label><label>Senha (mínimo 8 caracteres)<input type="password" name="s" required minlength="8" autocomplete="new-password"></label><button class="btn">Ativar acesso</button><p id="msg" class="sum"></p></form>';
 }
 function showAuth(){
+  tabIni = true;
   $('#nav').innerHTML = ''; $('#out').hidden = true; $('#sino').hidden = true; $('#sim').hidden = true; $('#role').textContent = 'Gestão da equipe de corrida';
   if (invite && !me) invite = false;
   $('#app').innerHTML = invite ? viewInvite() : recovery ? viewRecovery() : viewAuth();
@@ -271,6 +272,16 @@ function dashEstado(o){
   return dashVazio(o.dash) ? 'vazio' : 'ok';
 }
 function dashReset(){ DASH = null; DASH_ERRO = false; DASH_LOADING = false; DASH_SEQ++; }
+function rotuloAcesso(o){
+  if (o.sim) return 'Simulando a visão de ' + (o.sim === 'patrocinador' ? 'patrocinador' : o.sim === 'gestao' ? 'gestão' : 'atleta');
+  return o.spons ? 'Acesso de patrocinador' : o.realSup ? 'Acesso de administrador' : o.realAdmin ? 'Acesso de gestão' : 'Acesso de atleta';
+}
+function dashParaPapel(d, simPatro){
+  if (!d || !simPatro) return d;
+  var o = {}, k;
+  for (k in d) if (Object.prototype.hasOwnProperty.call(d, k) && k !== 'atletas') o[k] = d[k];
+  return o;
+}
 function montarAbas(o){
   var ab;
   if (o.admin) {
@@ -475,7 +486,7 @@ function usrList(){
   function sel(cls, op, atual, nomes){ return '<select class="' + cls + '">' + op.map(function(p){return '<option value="' + p + '"' + (p === atual ? ' selected' : '') + '>' + nomes[p] + '</option>'}).join('') + '</select>'; }
   l.slice(0, 100).forEach(function(u){
     h += '<div class="item"><div class="info"><b>' + esc(u.nome || 'Sem nome') + (u.id === me.id ? ' (você)' : '') + '</b><small>' + esc(u.email || 'sem e-mail') + '</small></div>' +
-      sel('sp', ['atleta', 'gestao', 'admin'], u.papel, PAP) + sel('ss', ['ativo', 'inativo', 'bloqueado'], u.status || 'ativo', STT) +
+      sel('sp', ['atleta', 'gestao', 'admin', 'patrocinador'], u.papel, PAP) + sel('ss', ['ativo', 'inativo', 'bloqueado'], u.status || 'ativo', STT) +
       '<label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox"' + (u.atleta ? ' checked' : '') + '> Atleta</label><button class="btn s g" data-pp="' + esc(u.id) + '">Salvar</button></div>';
   });
   $('#ulist').innerHTML = h;
@@ -622,41 +633,45 @@ async function refresh(){
   prof = pr.data;
   if (prof.status && prof.status !== 'ativo') { loginMsg = prof.status === 'bloqueado' ? 'Conta bloqueada. Procure um administrador.' : 'Conta inativa. Procure a gestão da equipe.'; await sb.auth.signOut(); return; }
   admin = prof.papel === 'gestao' || prof.papel === 'admin'; sup = prof.papel === 'admin'; realAdmin = admin; realSup = sup;
+  spons = prof.papel === 'patrocinador';
+  if (tabIni) { tabIni = false; if (spons && tab === 'cal') tab = 'dash'; }
+  var semAtl = spons && !prof.atleta, vazio = Promise.resolve({data: []});
   var a = await Promise.all([
-    sb.from('provas').select('*, prova_distancias(id,rotulo,ordem)').order('data'),
-    sb.from('reembolsos').select('*, perfis(nome), provas(nome)').order('criado_em', {ascending: false}),
+    semAtl ? vazio : sb.from('provas').select('*, prova_distancias(id,rotulo,ordem)').order('data'),
+    spons ? vazio : sb.from('reembolsos').select('*, perfis(nome), provas(nome)').order('criado_em', {ascending: false}),
     admin ? sb.from('perfis').select('*').eq('atleta', true) : Promise.resolve({data: []}),
-    sb.from('reembolso_historico').select('*').order('alterado_em'),
-    sb.from('renovacoes').select('*, perfis(nome)').order('criado_em', {ascending: false}),
+    spons ? vazio : sb.from('reembolso_historico').select('*').order('alterado_em'),
+    spons ? vazio : sb.from('renovacoes').select('*, perfis(nome)').order('criado_em', {ascending: false}),
     sup ? sb.from('perfis').select('*').order('nome') : Promise.resolve({data: []}),
     sup ? sb.from('solicitacoes_senha').select('*, perfis(nome,status)').order('criado_em', {ascending: false}).limit(100) : Promise.resolve({data: []}),
-    sb.from('prova_participantes').select(admin ? '*, perfis(nome)' : '*'),
-    sb.from('avisos').select('*').order('criado_em', {ascending: false}).limit(50)
+    semAtl ? vazio : sb.from('prova_participantes').select(admin ? '*, perfis(nome)' : '*'),
+    semAtl ? vazio : sb.from('avisos').select('*').order('criado_em', {ascending: false}).limit(50)
   ]);
   for (var i = 0; i < a.length; i++) if (a[i].error) return fail(a[i].error);
   P = a[0].data; R = a[1].data; ATL = a[2].data; HR = a[3].data; REN = a[4].data; USR = a[5].data; SEN = a[6].data; PART = a[7].data || []; AV = a[8].data || []; render();
 }
 function render(){
-  admin = realAdmin; sup = realSup; eAtl = !!prof.atleta;
+  admin = realAdmin; sup = realSup; eAtl = !!prof.atleta; spons = prof.papel === 'patrocinador';
   if (!realSup) sim = '';
-  var _R = R, _REN = REN;
+  var _R = R, _REN = REN, _DASH = DASH;
   if (sim) {
     sup = false; admin = sim === 'gestao';
+    if (sim === 'patrocinador') { admin = false; eAtl = false; spons = true; DASH = dashParaPapel(DASH, true); }
     if (sim === 'atleta') { eAtl = true; R = R.filter(function(x){return x.atleta_id === me.id}); REN = REN.filter(function(x){return x.atleta_id === me.id}); }
   }
   var np = REN.filter(function(x){return x.status == 'pendente'}).length, nr = R.filter(function(x){return x.status == 'pendente'}).length;
   var ns = SEN.filter(function(x){return x.status == 'pendente'}).length;
   var tabs = montarAbas({admin: admin, sup: sup, spons: spons, eAtl: eAtl, np: np, nr: nr, ns: ns});
-  if (tab != 'avi' && !tabs.some(function(t){return t[0] == tab})) tab = tabs[0][0];
-  var na = totalAvisos(); $('#sino').hidden = false; $('#sino').textContent = 'Avisos (' + na + ')';
+  if ((tab != 'avi' || (spons && !eAtl)) && !tabs.some(function(t){return t[0] == tab})) tab = tabs[0][0];
+  var na = totalAvisos(); $('#sino').hidden = spons && !eAtl; $('#sino').textContent = 'Avisos (' + na + ')';
   $('#nav').innerHTML = tabs.map(function(t){return '<button data-t="' + t[0] + '"' + (t[0] == tab ? ' class="on"' : '') + '>' + t[1] + '</button>'}).join('');
-  $('#role').textContent = (sim ? 'Simulando a visão de ' + (sim === 'gestao' ? 'gestão' : 'atleta') : realSup ? 'Acesso de administrador' : realAdmin ? 'Acesso de gestão' : 'Acesso de atleta') + (prof.nome ? ' · ' + prof.nome : '');
+  $('#role').textContent = rotuloAcesso({sim: sim, realSup: realSup, realAdmin: realAdmin, spons: spons}) + (prof.nome ? ' · ' + prof.nome : '');
   $('#out').hidden = false; $('#sim').hidden = !realSup; $('#sim').value = sim;
-  $('#app').innerHTML = (sim ? '<div class="al" role="status">Modo simulação: você está vendo a tela de ' + (sim === 'gestao' ? 'gestão' : 'atleta') + ', somente leitura.</div>' : '') + (aviso ? '<div class="al" role="status" style="border-color:#0B7A64">' + esc(aviso) + '</div>' : '') + ({cal: viewCal, ath: viewAth, me: viewMine, ren: viewRen, reb: viewReb, usr: viewUsr, conta: viewConta, dash: viewDash, sen: viewSen, imp: viewImp, avi: viewAvisos})[tab]();
+  $('#app').innerHTML = (sim ? '<div class="al" role="status">Modo simulação: você está vendo a tela de ' + (sim === 'gestao' ? 'gestão' : sim === 'patrocinador' ? 'patrocinador' : 'atleta') + ', somente leitura.</div>' : '') + (aviso ? '<div class="al" role="status" style="border-color:#0B7A64">' + esc(aviso) + '</div>' : '') + ({cal: viewCal, ath: viewAth, me: viewMine, ren: viewRen, reb: viewReb, usr: viewUsr, conta: viewConta, dash: viewDash, sen: viewSen, imp: viewImp, avi: viewAvisos})[tab]();
   if (tab == 'dash' && DASH === null && !DASH_LOADING && !DASH_ERRO) carregarDash();
   if (tab == 'usr') initUsr();
   if (tab == 'imp') initImp();
-  R = _R; REN = _REN;
+  R = _R; REN = _REN; DASH = _DASH;
   var f = $('#f');
   if (f && tab == 'reb') {
     var er2 = editRb ? R.filter(function(x){return x.id === editRb})[0] : null, src = rbRasc || (er2 ? {pid: er2.prova_id || '', descricao: er2.descricao, valor: er2.valor} : null);
