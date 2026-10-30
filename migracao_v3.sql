@@ -171,8 +171,8 @@ grant execute on function public.pagar_reembolsos(uuid[], date) to authenticated
 -- V3.3) DASHBOARD FINANCEIRO --------------------------------------------------------------
 -- Devolve só agregados. O patrocinador nunca recebe reembolsos individuais, nomes de atletas
 -- nem descrições; a chave "atletas" só existe para gestão/admin. O período (p_de/p_ate, nulos =
--- sem limite) vale para a data de solicitação (criado_em em São Paulo); no gráfico mensal e no
--- tempo médio, "pago" é filtrado pela data do pagamento (pago_em).
+-- sem limite) vale para a data de solicitação (criado_em em São Paulo): situações, provas, atletas,
+-- solicitado por mês e tempo médio. Só a série "pago" por mês usa a data do pagamento (pago_em).
 create or replace function public.dashboard_reembolsos(p_de date, p_ate date) returns jsonb
 language plpgsql stable security definer set search_path = ''
 as $$
@@ -192,7 +192,7 @@ begin
        and (p_ate is null or (r.criado_em at time zone 'America/Sao_Paulo')::date <= p_ate)
   ),
   pagos as (
-    select r.valor, r.pago_em, (r.criado_em at time zone 'America/Sao_Paulo')::date as dia
+    select r.valor, r.pago_em
       from public.reembolsos r
      where r.status = 'pago' and r.pago_em is not null
        and (p_de is null or r.pago_em >= p_de)
@@ -227,7 +227,7 @@ begin
                                         order by mes) from meses), '[]'::jsonb),
     'provas', coalesce((select jsonb_agg(jsonb_build_object('prova', prova, 'qtd', qtd, 'valor', valor)
                                          order by valor desc, prova) from prov), '[]'::jsonb),
-    'tempo_medio_dias', (select to_jsonb(round(avg(p.pago_em - p.dia), 1)) from pagos p)
+    'tempo_medio_dias', (select to_jsonb(round(avg(b.pago_em - b.dia), 1)) from base b where b.status = 'pago' and b.pago_em is not null)
   ) into res;
 
   if gestao then

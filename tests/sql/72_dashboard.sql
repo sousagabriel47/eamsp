@@ -33,7 +33,9 @@ insert into public.reembolsos (id, atleta_id, prova_id, descricao, valor, status
   ('72a00000-0000-4000-8000-000000000005', '72000000-0000-4000-8000-000000000005', null,                                   'segredo-desc-5',  40, 'recusado',  timestamptz '2026-02-20 12:00:00+00', null),
   ('72a00000-0000-4000-8000-000000000006', '72000000-0000-4000-8000-000000000005', '72b00000-0000-4000-8000-000000000001', 'segredo-desc-6',  25, 'cancelado', timestamptz '2026-03-01 12:00:00+00', null),
   ('72a00000-0000-4000-8000-000000000007', '72000000-0000-4000-8000-000000000005', null,                                   'segredo-desc-7',  60, 'pendente',  timestamptz '2026-03-05 12:00:00+00', null),
-  ('72a00000-0000-4000-8000-000000000008', '72000000-0000-4000-8000-000000000004', '72b00000-0000-4000-8000-000000000002', 'segredo-desc-8',  80, 'pago',      timestamptz '2026-02-28 12:00:00+00', date '2026-03-04');
+  ('72a00000-0000-4000-8000-000000000008', '72000000-0000-4000-8000-000000000004', '72b00000-0000-4000-8000-000000000002', 'segredo-desc-8',  80, 'pago',      timestamptz '2026-02-28 12:00:00+00', date '2026-03-04'),
+  -- 2026-03-01 02:30 UTC = 2026-02-28 23:30 em São Paulo: pertence a fevereiro
+  ('72a00000-0000-4000-8000-000000000009', '72000000-0000-4000-8000-000000000005', null,                                   'segredo-desc-9',  10, 'pendente',  timestamptz '2026-03-01 02:30:00+00', null);
 
 -- (a) gestão e admin: valores exatos
 do $$
@@ -44,23 +46,23 @@ begin
     set local role authenticated;
     r := public.dashboard_reembolsos(null, null);
     reset role;
-    assert r->'situacoes'->'pendente'  = '{"qtd":2,"valor":90}'::jsonb,  'a1: ' || r::text;
+    assert r->'situacoes'->'pendente'  = '{"qtd":3,"valor":100}'::jsonb, 'a1: ' || r::text;
     assert r->'situacoes'->'aprovado'  = '{"qtd":1,"valor":50}'::jsonb,  'a2: ' || r::text;
     assert r->'situacoes'->'pago'      = '{"qtd":3,"valor":380}'::jsonb, 'a3: ' || r::text;
     assert r->'situacoes'->'recusado'  = '{"qtd":1,"valor":40}'::jsonb,  'a4: ' || r::text;
     assert r->'situacoes'->'cancelado' = '{"qtd":1,"valor":25}'::jsonb,  'a5: ' || r::text;
     assert jsonb_typeof(r->'situacoes'->'pago'->'valor') = 'number', 'a6: número, não texto';
     assert r->'meses' = '[{"mes":"2026-01","solicitado":150,"pago":100},
-                          {"mes":"2026-02","solicitado":350,"pago":200},
+                          {"mes":"2026-02","solicitado":360,"pago":200},
                           {"mes":"2026-03","solicitado":60,"pago":80}]'::jsonb, 'a7: ' || (r->'meses')::text;
     assert r->'provas' = '[{"prova":"Corrida Beta","qtd":3,"valor":310},
                            {"prova":"Maratona Alfa","qtd":2,"valor":150},
-                           {"prova":"Sem prova","qtd":1,"valor":60}]'::jsonb, 'a8: ' || (r->'provas')::text;
+                           {"prova":"Sem prova","qtd":2,"valor":70}]'::jsonb, 'a8: ' || (r->'provas')::text;
     assert r->'tempo_medio_dias' = '3.7'::jsonb, 'a9: ' || (r->'tempo_medio_dias')::text;
     assert jsonb_typeof(r->'tempo_medio_dias') = 'number', 'a9b';
     assert r->'atletas' = '[{"nome":"Ana Dash","pediu":150,"recebeu":100,"a_receber":50},
                             {"nome":"Bruno Dash","pediu":310,"recebeu":280,"a_receber":0},
-                            {"nome":"Caio Dash","pediu":100,"recebeu":0,"a_receber":0}]'::jsonb, 'a10: ' || (r->'atletas')::text;
+                            {"nome":"Caio Dash","pediu":110,"recebeu":0,"a_receber":0}]'::jsonb, 'a10: ' || (r->'atletas')::text;
   end loop;
 end $$;
 
@@ -74,7 +76,7 @@ begin
   reset role;
   assert not (r ? 'atletas'), 'b1: ' || r::text;
   assert r->'situacoes'->'pago' = '{"qtd":3,"valor":380}'::jsonb, 'b2';
-  assert r->'situacoes'->'pendente' = '{"qtd":2,"valor":90}'::jsonb, 'b3';
+  assert r->'situacoes'->'pendente' = '{"qtd":3,"valor":100}'::jsonb, 'b3';
   assert jsonb_array_length(r->'meses') = 3, 'b4';
   assert r->'provas'->0->>'prova' = 'Corrida Beta', 'b5';
   assert r->'tempo_medio_dias' = '3.7'::jsonb, 'b6';
@@ -109,16 +111,17 @@ begin
   set local role authenticated;
   r := public.dashboard_reembolsos(date '2026-02-01', date '2026-02-28');
   reset role;
-  assert r->'situacoes'->'pendente'  = '{"qtd":1,"valor":30}'::jsonb,  'd1: ' || r::text;
+  assert r->'situacoes'->'pendente'  = '{"qtd":2,"valor":40}'::jsonb,  'd1: ' || r::text;
   assert r->'situacoes'->'pago'      = '{"qtd":2,"valor":280}'::jsonb, 'd2: ' || r::text;
   assert r->'situacoes'->'recusado'  = '{"qtd":1,"valor":40}'::jsonb,  'd3';
   assert r->'situacoes'->'aprovado'  = '{"qtd":0,"valor":0}'::jsonb,   'd4';
   assert r->'situacoes'->'cancelado' = '{"qtd":0,"valor":0}'::jsonb,   'd5';
-  assert r->'meses' = '[{"mes":"2026-02","solicitado":350,"pago":200}]'::jsonb, 'd6: ' || (r->'meses')::text;
-  assert r->'provas' = '[{"prova":"Corrida Beta","qtd":3,"valor":310}]'::jsonb, 'd7: ' || (r->'provas')::text;
-  assert r->'tempo_medio_dias' = '2.0'::jsonb or r->'tempo_medio_dias' = '2'::jsonb, 'd8: ' || (r->'tempo_medio_dias')::text;
+  assert r->'meses' = '[{"mes":"2026-02","solicitado":360,"pago":200}]'::jsonb, 'd6: ' || (r->'meses')::text;
+  assert r->'provas' = '[{"prova":"Corrida Beta","qtd":3,"valor":310},
+                           {"prova":"Sem prova","qtd":1,"valor":10}]'::jsonb, 'd7: ' || (r->'provas')::text;
+  assert r->'tempo_medio_dias' = '3.0'::jsonb, 'd8: média de #3 (2 dias) e #8 (4 dias), criados em fevereiro: ' || (r->'tempo_medio_dias')::text;
   assert r->'atletas' = '[{"nome":"Bruno Dash","pediu":310,"recebeu":280,"a_receber":0},
-                          {"nome":"Caio Dash","pediu":40,"recebeu":0,"a_receber":0}]'::jsonb, 'd9: ' || (r->'atletas')::text;
+                          {"nome":"Caio Dash","pediu":50,"recebeu":0,"a_receber":0}]'::jsonb, 'd9: ' || (r->'atletas')::text;
 end $$;
 
 -- (d2) só limite superior (janeiro)
@@ -138,6 +141,18 @@ begin
   reset role;
   assert r->'situacoes'->'pendente' = '{"qtd":1,"valor":60}'::jsonb, 'd2d: ' || r::text;
   assert r->'meses' = '[{"mes":"2026-03","solicitado":60,"pago":80}]'::jsonb, 'd2e: ' || (r->'meses')::text;
+  -- nenhum pago foi solicitado em março: média nula, mesmo havendo pagamento em março
+  assert jsonb_typeof(r->'tempo_medio_dias') = 'null', 'd2f: ' || (r->'tempo_medio_dias')::text;
+  -- fuso: a linha de 23:30 em São Paulo (02:30 UTC de 01/03) não entra em até 27/02 e entra em até 28/02
+  set local role authenticated;
+  r := public.dashboard_reembolsos(date '2026-02-28', date '2026-02-28');
+  reset role;
+  assert r->'situacoes'->'pendente' = '{"qtd":1,"valor":10}'::jsonb, 'd2g: ' || r::text;
+  assert r->'situacoes'->'pago' = '{"qtd":1,"valor":80}'::jsonb, 'd2h: ' || r::text;
+  set local role authenticated;
+  r := public.dashboard_reembolsos(null, date '2026-02-27');
+  reset role;
+  assert r->'situacoes'->'pendente' = '{"qtd":1,"valor":30}'::jsonb, 'd2i: ' || r::text;
 end $$;
 
 -- (d3) período vazio e período invertido: zeros
