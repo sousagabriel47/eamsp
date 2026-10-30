@@ -54,7 +54,10 @@ grant execute on function public.definir_papel(uuid, text) to authenticated;
 
 -- V3.2) PAGAMENTO EM LOTE -----------------------------------------------------------------
 alter table public.reembolsos add column if not exists pago_em date;
-alter table public.reembolsos add column if not exists pago_por uuid references public.perfis (id) on delete set null;
+-- pago_por é só um id (como decidido_por), SEM chave estrangeira: uma segunda FK para perfis deixaria
+-- ambígua a consulta perfis(nome) da API e quebraria a tela de reembolsos.
+alter table public.reembolsos add column if not exists pago_por uuid;
+alter table public.reembolsos drop constraint if exists reembolsos_pago_por_fkey;
 
 -- Backfill idempotente: pagos antes desta migração usam a data da decisão (ou da última atualização; fuso de São Paulo)
 update public.reembolsos
