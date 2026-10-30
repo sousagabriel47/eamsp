@@ -272,6 +272,8 @@ function dashEstado(o){
   return dashVazio(o.dash) ? 'vazio' : 'ok';
 }
 function dashReset(){ DASH = null; DASH_ERRO = false; DASH_LOADING = false; DASH_SEQ++; }
+// Patrocinador que não é atleta não tem provas, reembolsos, renovações nem avisos próprios: pula essas consultas.
+function consultasUsuario(o){ return {dados: !(o.spons && !o.atleta)}; }
 function rotuloAcesso(o){
   if (o.sim) return 'Simulando a visão de ' + (o.sim === 'patrocinador' ? 'patrocinador' : o.sim === 'gestao' ? 'gestão' : 'atleta');
   return o.spons ? 'Acesso de patrocinador' : o.realSup ? 'Acesso de administrador' : o.realAdmin ? 'Acesso de gestão' : 'Acesso de atleta';
@@ -477,7 +479,7 @@ function viewRen(){
   return h;
 }
 function viewUsr(){
-  return '<h2>Usuários e funções</h2><p class="sum">Atleta: usa os próprios dados. Gestão: valida renovações e reembolsos e cadastra provas. Administrador: tudo isso e atribui as funções. A pessoa precisa sair e entrar de novo para a nova função valer.</p><label style="margin-bottom:10px">Buscar por nome ou e-mail<input id="uq" autocomplete="off"></label><div id="ulist"></div>';
+  return '<h2>Usuários e funções</h2><p class="sum">Atleta: usa os próprios dados. Gestão: valida renovações e reembolsos e cadastra provas. Administrador: tudo isso e atribui as funções. Patrocinador: vê apenas o dashboard com totais, sem dados pessoais; pode ser também atleta. A pessoa precisa sair e entrar de novo para a nova função valer.</p><label style="margin-bottom:10px">Buscar por nome ou e-mail<input id="uq" autocomplete="off"></label><div id="ulist"></div>';
 }
 function usrList(){
   var q = ($('#uq').value || '').trim().toLowerCase();
@@ -635,17 +637,17 @@ async function refresh(){
   admin = prof.papel === 'gestao' || prof.papel === 'admin'; sup = prof.papel === 'admin'; realAdmin = admin; realSup = sup;
   spons = prof.papel === 'patrocinador';
   if (tabIni) { tabIni = false; if (spons && tab === 'cal') tab = 'dash'; }
-  var semAtl = spons && !prof.atleta, vazio = Promise.resolve({data: []});
+  var q = consultasUsuario({spons: spons, atleta: !!prof.atleta}), vazio = Promise.resolve({data: []});
   var a = await Promise.all([
-    semAtl ? vazio : sb.from('provas').select('*, prova_distancias(id,rotulo,ordem)').order('data'),
-    spons ? vazio : sb.from('reembolsos').select('*, perfis(nome), provas(nome)').order('criado_em', {ascending: false}),
+    q.dados ? sb.from('provas').select('*, prova_distancias(id,rotulo,ordem)').order('data') : vazio,
+    q.dados ? sb.from('reembolsos').select('*, perfis(nome), provas(nome)').order('criado_em', {ascending: false}) : vazio,
     admin ? sb.from('perfis').select('*').eq('atleta', true) : Promise.resolve({data: []}),
-    spons ? vazio : sb.from('reembolso_historico').select('*').order('alterado_em'),
-    spons ? vazio : sb.from('renovacoes').select('*, perfis(nome)').order('criado_em', {ascending: false}),
+    q.dados ? sb.from('reembolso_historico').select('*').order('alterado_em') : vazio,
+    q.dados ? sb.from('renovacoes').select('*, perfis(nome)').order('criado_em', {ascending: false}) : vazio,
     sup ? sb.from('perfis').select('*').order('nome') : Promise.resolve({data: []}),
     sup ? sb.from('solicitacoes_senha').select('*, perfis(nome,status)').order('criado_em', {ascending: false}).limit(100) : Promise.resolve({data: []}),
-    semAtl ? vazio : sb.from('prova_participantes').select(admin ? '*, perfis(nome)' : '*'),
-    semAtl ? vazio : sb.from('avisos').select('*').order('criado_em', {ascending: false}).limit(50)
+    q.dados ? sb.from('prova_participantes').select(admin ? '*, perfis(nome)' : '*') : vazio,
+    q.dados ? sb.from('avisos').select('*').order('criado_em', {ascending: false}).limit(50) : vazio
   ]);
   for (var i = 0; i < a.length; i++) if (a[i].error) return fail(a[i].error);
   P = a[0].data; R = a[1].data; ATL = a[2].data; HR = a[3].data; REN = a[4].data; USR = a[5].data; SEN = a[6].data; PART = a[7].data || []; AV = a[8].data || []; render();

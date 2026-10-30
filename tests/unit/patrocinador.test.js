@@ -24,3 +24,10 @@ test('dashParaPapel remove atletas só na simulação e não muta o original', (
   assert.strictEqual(c.dashParaPapel(d, false).atletas.length, 1);
   assert.strictEqual(c.dashParaPapel(null, true), null);
 });
+test('consultasUsuario pula dados de atleta só para patrocinador sem atleta', () => {
+  const c = load();
+  assert.strictEqual(c.consultasUsuario({ spons: true, atleta: false }).dados, false);
+  assert.strictEqual(c.consultasUsuario({ spons: true, atleta: true }).dados, true);
+  assert.strictEqual(c.consultasUsuario({ spons: false, atleta: true }).dados, true);
+  assert.strictEqual(c.consultasUsuario({ spons: false, atleta: false }).dados, true);
+});
