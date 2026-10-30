@@ -103,7 +103,7 @@ begin
   end loop;
 end $$;
 
--- (d) período restringe (fevereiro; pago conta por pago_em, solicitado por criado_em)
+-- (d) período restringe (fevereiro; situacoes e tempo médio seguem criado_em; só meses[].pago usa pago_em)
 do $$
 declare r jsonb;
 begin

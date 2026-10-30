@@ -1,4 +1,5 @@
 -- migracao_v3.sql — dashboard financeiro, pagamento em lote e função patrocinador.
+-- Para quem já tem a v2 instalada; instalações novas usam apenas o schema.sql.
 -- Rode depois da migracao_v2.sql. Idempotente.
 -- ATENÇÃO: depois de rodar a migracao_v2.sql de novo, rode esta migracao_v3.sql novamente
 -- (a v2 recria o gatilho de reembolsos sem as regras daqui).

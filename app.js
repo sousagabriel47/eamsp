@@ -272,7 +272,7 @@ function dashEstado(o){
   return dashVazio(o.dash) ? 'vazio' : 'ok';
 }
 function dashReset(){ DASH = null; DASH_ERRO = false; DASH_LOADING = false; DASH_SEQ++; }
-// Patrocinador que não é atleta não tem provas, reembolsos, renovações nem avisos próprios: pula essas consultas.
+// Patrocinador que não é atleta não tem provas, reembolsos, renovações, avisos, histórico nem participações próprios: pula essas consultas.
 function consultasUsuario(o){ return {dados: !(o.spons && !o.atleta)}; }
 function rotuloAcesso(o){
   if (o.sim) return 'Simulando a visão de ' + (o.sim === 'patrocinador' ? 'patrocinador' : o.sim === 'gestao' ? 'gestão' : 'atleta');
