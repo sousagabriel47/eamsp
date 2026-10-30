@@ -167,3 +167,92 @@ end;
 $$;
 revoke execute on function public.pagar_reembolsos(uuid[], date) from public, anon;
 grant execute on function public.pagar_reembolsos(uuid[], date) to authenticated;
+
+-- V3.3) DASHBOARD FINANCEIRO --------------------------------------------------------------
+-- Devolve só agregados. O patrocinador nunca recebe reembolsos individuais, nomes de atletas
+-- nem descrições; a chave "atletas" só existe para gestão/admin. O período (p_de/p_ate, nulos =
+-- sem limite) vale para a data de solicitação (criado_em em São Paulo); no gráfico mensal e no
+-- tempo médio, "pago" é filtrado pela data do pagamento (pago_em).
+create or replace function public.dashboard_reembolsos(p_de date, p_ate date) returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  gestao boolean := public.is_gestao();
+  res jsonb;
+  atl jsonb;
+begin
+  if not (gestao or public.is_patrocinador()) then
+    raise exception 'Sem permissão para ver o dashboard.';
+  end if;
+
+  with base as (
+    select r.*, (r.criado_em at time zone 'America/Sao_Paulo')::date as dia
+      from public.reembolsos r
+     where (p_de is null or (r.criado_em at time zone 'America/Sao_Paulo')::date >= p_de)
+       and (p_ate is null or (r.criado_em at time zone 'America/Sao_Paulo')::date <= p_ate)
+  ),
+  pagos as (
+    select r.valor, r.pago_em, (r.criado_em at time zone 'America/Sao_Paulo')::date as dia
+      from public.reembolsos r
+     where r.status = 'pago' and r.pago_em is not null
+       and (p_de is null or r.pago_em >= p_de)
+       and (p_ate is null or r.pago_em <= p_ate)
+  ),
+  sit as (
+    select s.s,
+           jsonb_build_object('qtd', count(b.id), 'valor', coalesce(sum(b.valor), 0)) as v
+      from unnest(array['pendente', 'aprovado', 'pago', 'recusado', 'cancelado']) as s(s)
+      left join base b on b.status = s.s
+     group by s.s
+  ),
+  meses as (
+    select m.mes,
+           coalesce((select sum(b.valor) from base b
+                      where b.status <> 'cancelado' and to_char(b.dia, 'YYYY-MM') = m.mes), 0) as solicitado,
+           coalesce((select sum(p.valor) from pagos p
+                      where to_char(p.pago_em, 'YYYY-MM') = m.mes), 0) as pago
+      from (select to_char(b.dia, 'YYYY-MM') as mes from base b where b.status <> 'cancelado'
+            union
+            select to_char(p.pago_em, 'YYYY-MM') from pagos p) m
+  ),
+  prov as (
+    select coalesce(p.nome, 'Sem prova') as prova, count(*) as qtd, sum(b.valor) as valor
+      from base b left join public.provas p on p.id = b.prova_id
+     where b.status in ('pendente', 'aprovado', 'pago')
+     group by coalesce(p.nome, 'Sem prova')
+  )
+  select jsonb_build_object(
+    'situacoes', (select jsonb_object_agg(s, v) from sit),
+    'meses', coalesce((select jsonb_agg(jsonb_build_object('mes', mes, 'solicitado', solicitado, 'pago', pago)
+                                        order by mes) from meses), '[]'::jsonb),
+    'provas', coalesce((select jsonb_agg(jsonb_build_object('prova', prova, 'qtd', qtd, 'valor', valor)
+                                         order by valor desc, prova) from prov), '[]'::jsonb),
+    'tempo_medio_dias', (select to_jsonb(round(avg(p.pago_em - p.dia), 1)) from pagos p)
+  ) into res;
+
+  if gestao then
+    select coalesce(jsonb_agg(jsonb_build_object('nome', t.nome, 'pediu', t.pediu,
+                                                 'recebeu', t.recebeu, 'a_receber', t.a_receber)
+                              order by t.nome, t.atleta_id), '[]'::jsonb)
+      into atl
+      from (
+        select r.atleta_id, pf.nome,
+               coalesce(sum(r.valor) filter (where r.status <> 'cancelado'), 0) as pediu,
+               coalesce(sum(r.valor) filter (where r.status = 'pago'), 0) as recebeu,
+               coalesce(sum(r.valor) filter (where r.status = 'aprovado'), 0) as a_receber
+          from public.reembolsos r
+          join public.perfis pf on pf.id = r.atleta_id
+         where (p_de is null or (r.criado_em at time zone 'America/Sao_Paulo')::date >= p_de)
+           and (p_ate is null or (r.criado_em at time zone 'America/Sao_Paulo')::date <= p_ate)
+         group by r.atleta_id, pf.nome
+      ) t;
+    res := res || jsonb_build_object('atletas', atl);
+  end if;
+  return res;
+end;
+$$;
+revoke execute on function public.dashboard_reembolsos(date, date) from public, anon;
+grant execute on function public.dashboard_reembolsos(date, date) to authenticated;
+
+-- faz a API do Supabase reconhecer as novas funções/colunas sem esperar o cache
+notify pgrst, 'reload schema';
