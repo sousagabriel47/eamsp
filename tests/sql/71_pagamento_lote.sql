@@ -1,8 +1,6 @@
 -- V3.2: pagamento em lote e data de pagamento
 begin;
 
--- o teste 30 reaplica só a v2 (restaura o gatilho antigo); refaz a ordem real v2 -> v3
-\ir ../../migracao_v3.sql
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('71000000-0000-4000-8000-000000000001', 'lg1@t.com', '{"nome":"Gestor L1"}'),
@@ -198,7 +196,7 @@ begin
   perform set_config('request.jwt.claim.sub', '71000000-0000-4000-8000-000000000002', true);
   set local role authenticated;
   n := public.pagar_reembolsos(array[
-    '71a00000-0000-4000-8000-000000000006', '71a00000-0000-4000-8000-000000000006',
+    '71a00000-0000-4000-8000-000000000006', null, '71a00000-0000-4000-8000-000000000006',
     '71a00000-0000-4000-8000-000000000004']::uuid[], current_date);
   reset role;
   assert n = 2, 'g1: ' || n;
@@ -231,6 +229,8 @@ begin
     assert false, 'i2: deveria falhar';
   exception when insufficient_privilege then
     reset role;
+    get stacked diagnostics st = returned_sqlstate;
+    assert st = '42501', 'i2: ' || st;
   end;
   assert (select pago_em from public.reembolsos where id = '71a00000-0000-4000-8000-000000000007') is null, 'i3';
 end $$;
@@ -254,6 +254,8 @@ insert into public.reembolsos (id, atleta_id, descricao, valor, status) values
 update public.reembolsos set decidido_em = timestamptz '2026-03-10 02:00:00+00',
   decidido_por = '71000000-0000-4000-8000-000000000002'
   where id = '71a00000-0000-4000-8000-000000000008';
+insert into public.reembolsos (id, atleta_id, descricao, valor, status) values
+  ('71a00000-0000-4000-8000-000000000009', '71000000-0000-4000-8000-000000000003', 'x', 90, 'pago');
 do $$
 begin
   assert (select pago_em from public.reembolsos where id = '71a00000-0000-4000-8000-000000000008') is null, 'k0';
@@ -264,6 +266,23 @@ begin
   assert (select pago_em from public.reembolsos where id = '71a00000-0000-4000-8000-000000000008') = date '2026-03-09', 'k1';
   assert (select pago_por from public.reembolsos where id = '71a00000-0000-4000-8000-000000000008')
          = '71000000-0000-4000-8000-000000000002', 'k2';
+  assert (select pago_em from public.reembolsos where id = '71a00000-0000-4000-8000-000000000009') = (now() at time zone 'America/Sao_Paulo')::date, 'k3: usa atualizado_em';
+  assert (select pago_por from public.reembolsos where id = '71a00000-0000-4000-8000-000000000009') is null, 'k4';
+end $$;
+
+-- (l) depois do re-apply v2 (teste 30) + v3 e de reaplicar a v3, o botão individual ainda preenche pago_em
+insert into public.reembolsos (id, atleta_id, descricao, valor, status) values
+  ('71a00000-0000-4000-8000-00000000000a', '71000000-0000-4000-8000-000000000003', 'x', 15, 'aprovado');
+do $$
+begin
+  perform set_config('request.jwt.claim.sub', '71000000-0000-4000-8000-000000000002', true);
+  set local role authenticated;
+  update public.reembolsos set status = 'pago' where id = '71a00000-0000-4000-8000-00000000000a';
+  reset role;
+  assert (select pago_em from public.reembolsos where id = '71a00000-0000-4000-8000-00000000000a')
+         = (now() at time zone 'America/Sao_Paulo')::date, 'l1';
+  assert (select pago_por from public.reembolsos where id = '71a00000-0000-4000-8000-00000000000a')
+         = '71000000-0000-4000-8000-000000000002', 'l2';
 end $$;
 
 rollback;

@@ -1,5 +1,7 @@
 -- migracao_v3.sql — dashboard financeiro, pagamento em lote e função patrocinador.
 -- Rode depois da migracao_v2.sql. Idempotente.
+-- ATENÇÃO: depois de rodar a migracao_v2.sql de novo, rode esta migracao_v3.sql novamente
+-- (a v2 recria o gatilho de reembolsos sem as regras daqui).
 
 -- V3.1) FUNÇÃO PATROCINADOR ---------------------------------------------------------------
 -- Novo valor de papel. O patrocinador não ganha nenhuma permissão nova: não lê reembolsos,
@@ -53,11 +55,11 @@ grant execute on function public.definir_papel(uuid, text) to authenticated;
 alter table public.reembolsos add column if not exists pago_em date;
 alter table public.reembolsos add column if not exists pago_por uuid references public.perfis (id) on delete set null;
 
--- Backfill idempotente: pagos antes desta migração usam a data da decisão (fuso de São Paulo)
+-- Backfill idempotente: pagos antes desta migração usam a data da decisão (ou da última atualização; fuso de São Paulo)
 update public.reembolsos
-   set pago_em = (decidido_em at time zone 'America/Sao_Paulo')::date,
+   set pago_em = (coalesce(decidido_em, atualizado_em) at time zone 'America/Sao_Paulo')::date,
        pago_por = decidido_por
- where status = 'pago' and pago_em is null and decidido_em is not null;
+ where status = 'pago' and pago_em is null;
 
 -- pago_em/pago_por NÃO entram no grant de update: só o gatilho e pagar_reembolsos os gravam
 revoke update on public.reembolsos from authenticated;
