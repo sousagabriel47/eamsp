@@ -2,6 +2,7 @@ var HASH = location.hash || '';
 var ENTRADA = /type=invite/.test(HASH) ? 'invite' : /type=signup/.test(HASH) ? 'signup' : /type=recovery/.test(HASH) ? 'recovery' : '';
 var ERRO = /error(_code|_description)?=/.test(HASH);
 var PART = [], sb, me = null, prof = null, admin = false, sup = false, sim = '', realAdmin = false, realSup = false, eAtl = false, USR = [], P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', editId = '', SEN = [], loginMsg = '', IMP = {rows: [], erros: [], res: [], busy: false}, recovery = false, invite = (ENTRADA === 'invite'), aviso = '';
+var SEL = {}, LOTE_DATA = '';
 var AV = [], HR = [], previa = null, editRb = '', rbRasc = null;
 var MES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 function dig(t){ return String(t == null ? '' : t).replace(/\D/g, ''); }
@@ -202,6 +203,18 @@ function showAuth(){
 }
 
 /* ---------- Funções puras ---------- */
+// Pagamento em lote: só aprovado de outro atleta pode ser selecionado.
+function lotePodeSelecionar(r, meId){return !!r && r.status === 'aprovado' && r.atleta_id !== meId}
+function loteResumo(sel, rs, meId){
+  var o = {n: 0, total: 0, ids: []};
+  (rs || []).forEach(function(r){ if (sel && sel[r.id] && lotePodeSelecionar(r, meId)) { o.n++; o.total += Number(r.valor); o.ids.push(r.id); } });
+  o.total = Math.round(o.total * 100) / 100;
+  return o;
+}
+function loteBarraHtml(resumo, data){
+  if (!resumo || !resumo.n) return '';
+  return '<div class="lotebar"><b>' + resumo.n + (resumo.n === 1 ? ' selecionado' : ' selecionados') + ' · ' + money(resumo.total) + '</b><label>Data do pagamento<input type="date" id="lotedata" max="' + today() + '" value="' + esc(data) + '"></label><div class="acts"><button class="btn s g" data-lote="1">Marcar como pagos</button><button class="btn s x" data-lotelimpa="1">Limpar seleção</button></div></div>';
+}
 // Avisos calculados na hora (vencimentos e pendências). 'texto' já é HTML seguro (nomes escapados).
 function avisosCalculados(o){
   var out = [];
@@ -500,15 +513,18 @@ function viewReb(){
     h += '<p class="sum">Pendente ' + money(tot.pendente) + ' · Aprovado a pagar ' + money(tot.aprovado) + ' · Pago ' + money(tot.pago) + '</p>';
   }
   if (!R.length) h += '<p class="empty">Nenhuma solicitação até agora.</p>';
+  var elegiveis = admin ? R.filter(function(r){return lotePodeSelecionar(r, me.id)}) : [];
+  if (elegiveis.length) h += '<label style="flex-direction:row;align-items:center;gap:8px;margin:4px 0"><input type="checkbox" data-selall="1"' + (elegiveis.every(function(r){return SEL[r.id]}) ? ' checked' : '') + '> Selecionar todos os aprovados</label>';
   R.forEach(function(r){
     var c = r.status == 'recusado' || r.status == 'cancelado' ? 'b' : r.status == 'pendente' ? 'w' : '';
     var nome = r.perfis && r.perfis.nome ? r.perfis.nome : 'Sem nome', own = r.atleta_id === me.id;
-    h += '<div class="item"><div class="info"><b>' + (admin ? esc(nome) + (own ? ' (você)' : '') + ' · ' : '') + money(r.valor) + '</b><small>' + esc(r.descricao) + (r.provas ? ' • ' + esc(r.provas.nome) : '') + ' • ' + br(r.criado_em.slice(0,10)) + (r.status == 'recusado' && r.motivo_decisao ? ' • Motivo: ' + esc(r.motivo_decisao) : '') + '</small></div><span class="tag ' + c + '">' + STL[r.status] + '</span><div class="acts">' + pdfBtn(r) +
+    h += '<div class="item">' + (admin && lotePodeSelecionar(r, me.id) ? '<input type="checkbox" data-sel="' + esc(r.id) + '"' + (SEL[r.id] ? ' checked' : '') + ' aria-label="Selecionar">' : '') + '<div class="info"><b>' + (admin ? esc(nome) + (own ? ' (você)' : '') + ' · ' : '') + money(r.valor) + '</b><small>' + esc(r.descricao) + (r.provas ? ' • ' + esc(r.provas.nome) : '') + ' • ' + br(r.criado_em.slice(0,10)) + (r.status == 'recusado' && r.motivo_decisao ? ' • Motivo: ' + esc(r.motivo_decisao) : '') + '</small></div><span class="tag ' + c + '">' + STL[r.status] + '</span><div class="acts">' + pdfBtn(r) +
       (own && r.status == 'recusado' ? '<button class="btn s g" data-rv="' + esc(r.id) + '">Corrigir e reenviar</button>' : '') +
       (admin && !own && r.status == 'pendente' ? '<button class="btn s g" data-st="aprovado|' + r.id + '">Aprovar</button><button class="btn s x" data-st="recusado|' + r.id + '">Recusar</button>' : '') +
       (admin && !own && r.status == 'aprovado' ? '<button class="btn s g" data-st="pago|' + r.id + '">Marcar como pago</button>' : '') +
-      (own && r.status == 'pendente' ? '<span class="tag w">Aguarda outro gestor</span>' : '') + (own && r.status == 'pendente' ? '<button class="btn s x" data-st="cancelado|' + r.id + '">Cancelar</button>' : '') + '</div>' + historicoReembolso(r, HR) + '</div>';
+      (own && r.status == 'pendente' ? '<span class="tag w">Aguarda outro gestor</span>' : '') + (admin && own && r.status == 'aprovado' ? '<span class="tag w">outro gestor precisa pagar</span>' : '') + (own && r.status == 'pendente' ? '<button class="btn s x" data-st="cancelado|' + r.id + '">Cancelar</button>' : '') + '</div>' + historicoReembolso(r, HR) + '</div>';
   });
+  if (admin) h += loteBarraHtml(loteResumo(SEL, R, me.id), LOTE_DATA || today());
   return h;
 }
 
@@ -618,11 +634,21 @@ function render(){
   };
 }
 
+document.addEventListener('change', function(e){
+  var t = e.target; if (!t || !t.dataset) return;
+  if (t.dataset.sel) { if (t.checked) SEL[t.dataset.sel] = true; else delete SEL[t.dataset.sel]; render(); }
+  else if (t.dataset.selall) {
+    R.forEach(function(r){ if (lotePodeSelecionar(r, me.id)) { if (t.checked) SEL[r.id] = true; else delete SEL[r.id]; } });
+    render();
+  }
+  else if (t.id === 'lotedata') { LOTE_DATA = t.value; }
+});
+
 document.addEventListener('click', async function(e){
   var b = e.target.closest('button'); if (!b) return;
   if (b.dataset.am) { authMode = b.dataset.am; showAuth(); return; }
   if (b.id === 'out') { await sb.auth.signOut(); return; }
-  if (b.dataset.t) { tab = b.dataset.t; aviso = ''; editId = ''; editRb = ''; previa = null; rbRasc = null; refresh(); return; }
+  if (b.dataset.t) { tab = b.dataset.t; aviso = ''; SEL = {}; LOTE_DATA = ''; editId = ''; editRb = ''; previa = null; rbRasc = null; refresh(); return; }
   if (b.dataset.rbno) { if (previa) rbRasc = {pid: previa.pid, descricao: previa.descricao, valor: previa.valor, arquivo: previa.arquivo}; else editRb = ''; previa = null; render(); return; }
   if (b.dataset.ed) { editId = b.dataset.ed; render(); window.scrollTo(0, 0); return; }
   if (b.dataset.edc) { editId = ''; render(); return; }
@@ -630,7 +656,7 @@ document.addEventListener('click', async function(e){
   if (b.dataset.impdl) { baixar('resultado_convites.csv', 'email;status;detalhe\n' + IMP.res.map(function(x){return [x.email, x.status, '"' + String(x.detalhe || '').replace(/"/g, '""') + '"'].join(';')}).join('\n')); return; }
   if (b.dataset.impgo) { await enviarLote(); return; }
   if (b.dataset.pdf) { await abrirAnexo(b.dataset.pdf); return; }
-  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.ep || b.dataset.st || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn || b.dataset.rbok || b.dataset.rv || b.dataset.vc || b.dataset.vs || b.dataset.lido || b.dataset.lidot !== undefined)) { alert(MSGSIM); return; }
+  if (sim && (b.dataset.delp || b.dataset.lk || b.dataset.ep || b.dataset.st || b.dataset.lote || b.dataset.lotelimpa || b.dataset.rn || b.dataset.em || b.dataset.pp || b.dataset.sn || b.dataset.rbok || b.dataset.rv || b.dataset.vc || b.dataset.vs || b.dataset.lido || b.dataset.lidot !== undefined)) { alert(MSGSIM); return; }
   if (b.dataset.lt) {
     var pl = P.filter(function(x){return x.id === b.dataset.lt})[0];
     if (pl) { var url = URL.createObjectURL(new Blob([listaTendaHtml(pl, PART.filter(function(x){return x.prova_id === pl.id}))], {type: 'text/html'})); window.open(url, '_blank'); setTimeout(function(){ URL.revokeObjectURL(url); }, 60000); }
@@ -650,6 +676,16 @@ document.addEventListener('click', async function(e){
     if (p[0] === 'recusado') { u.motivo_decisao = (prompt('Motivo da recusa (obrigatório):') || '').trim(); if (!u.motivo_decisao) return; }
     else if (p[0] === 'aprovado' && !confirm('Aprovar este reembolso?')) return;
     r = await sb.from('reembolsos').update(u).eq('id', p[1]);
+  }
+  else if (b.dataset.lotelimpa) { SEL = {}; render(); return; }
+  else if (b.dataset.lote) {
+    var rl = loteResumo(SEL, R, me.id), dl = ($('#lotedata') || {}).value || today();
+    if (!rl.n) return;
+    if (!confirm(rl.n + ' reembolso(s) · ' + money(rl.total) + ' · pagos em ' + br(dl))) return;
+    b.disabled = true;
+    r = await sb.rpc('pagar_reembolsos', {p_ids: rl.ids, p_data: dl});
+    b.disabled = false;
+    if (!r.error) { SEL = {}; aviso = rl.n + (rl.n === 1 ? ' reembolso marcado como pago.' : ' reembolsos marcados como pagos.'); }
   }
   else if (b.dataset.rv) { editRb = b.dataset.rv; previa = null; rbRasc = null; render(); window.scrollTo(0, 0); return; }
   else if (b.dataset.rbok) {
