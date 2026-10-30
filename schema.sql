@@ -1210,6 +1210,9 @@ drop trigger if exists depois_decidir_renovacao on public.renovacoes;
 create trigger depois_decidir_renovacao after update on public.renovacoes
   for each row execute function public.avisar_decisao_renovacao();
 
+-- Faz a API do Supabase (PostgREST) reconhecer as tabelas e relações novas sem esperar o cache expirar
+notify pgrst, 'reload schema';
+
 
 -- 5) PRIMEIRO ACESSO DE ADMINISTRADOR ------------------------------------------
 -- Cadastre-se no sistema, depois rode (trocando o e-mail). Os demais níveis
