@@ -25,6 +25,7 @@ on conflict do nothing;
 
 -- (a) texto antigo de distancia vira linha; não duplica ao reaplicar
 \ir ../../migracao_v2.sql
+\ir ../../migracao_v3.sql
 do $$ begin
   assert (select count(*) from public.prova_distancias where prova_id = 'f1000000-0000-4000-8000-000000000001') = 1, 'a1';
   assert (select rotulo from public.prova_distancias where prova_id = 'f1000000-0000-4000-8000-000000000001') = '5k, 10k', 'a2';
@@ -32,6 +33,7 @@ do $$ begin
   assert (select count(*) from public.prova_distancias where prova_id = 'f1000000-0000-4000-8000-000000000004') = 2, 'a4: texto em branco não migra';
 end $$;
 \ir ../../migracao_v2.sql
+\ir ../../migracao_v3.sql
 do $$ begin
   assert (select count(*) from public.prova_distancias where prova_id = 'f1000000-0000-4000-8000-000000000001') = 1, 'a5: duplicou';
   assert (select tem_lista_presenca from public.provas where id = 'f1000000-0000-4000-8000-000000000001') = false, 'a6';

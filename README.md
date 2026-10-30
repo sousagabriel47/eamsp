@@ -13,7 +13,7 @@ Site estático (HTML + JavaScript) publicado no GitHub Pages. Os dados ficam no 
 7. **Teste de permissões:** com duas contas de atleta e uma de gestão, siga o roteiro do fim do `schema.sql`.
 
 ## Atualizar uma instalação existente
-Quem já tem o sistema instalado **não** roda o `schema.sql` de novo: abra o *SQL Editor* do Supabase, cole o `migracao_v2.sql` e clique em *Run*, uma vez. Pode rodar de novo sem problema (ele não duplica nada). Instalações novas usam apenas o `schema.sql`, que já inclui tudo. Para instalações anteriores aos níveis de acesso, rode antes o `migracao_niveis.sql`. Publique a migração do banco e o novo `app.js` juntos: um `app.js` antigo, ainda em cache, que aprove renovações depois da migração recebe o erro "Informe a data de emissão".
+Quem já tem o sistema instalado **não** roda o `schema.sql` de novo: abra o *SQL Editor* do Supabase, cole o `migracao_v2.sql` e clique em *Run*; depois faça o mesmo com o `migracao_v3.sql`. Cada uma pode ser repetida sem problema (não duplica nada), mas **se você rodar a `migracao_v2.sql` de novo, rode a `migracao_v3.sql` depois de novo** (a v2 recria o gatilho de reembolsos sem as regras da v3). Instalações novas usam apenas o `schema.sql`, que já inclui tudo. Para instalações anteriores aos níveis de acesso, rode antes o `migracao_niveis.sql`; não rode a migracao_niveis.sql depois da v3 (ela é só para instalações antigas e recriaria a lista antiga de funções). As migrações terminam com um comando que recarrega o cache da API do Supabase; se o site mostrar "Could not find a relationship … in the schema cache", rode `notify pgrst, 'reload schema';` no SQL Editor. Publique a migração do banco e o novo `app.js` juntos: um `app.js` antigo, ainda em cache, que aprove renovações depois da migração recebe o erro "Informe a data de emissão".
 
 ## Funções da versão 2
 - **Reembolso:** o valor da inscrição é preenchido a partir da prova escolhida; antes de enviar há uma prévia do pedido; se for recusado, o atleta corrige e reenvia o mesmo pedido, e o histórico de tentativas fica guardado.
@@ -21,10 +21,16 @@ Quem já tem o sistema instalado **não** roda o `schema.sql` de novo: abra o *S
 - **Avisos dentro do sistema:** um sino mostra pendências e novidades (por exemplo, decisão sobre renovação ou reembolso). **Avisos por e-mail ainda não existem.**
 - **Renovações pela gestão:** a gestão informa a data de emissão e a de pagamento; mudanças na emissão ficam no histórico.
 
+## Dashboard financeiro e pagamento em lote
+- **Dashboard financeiro:** cartões por situação (pendente, aprovado, pago, recusado), barras por mês, ranking por prova, tempo médio até o pagamento e filtro de período (o período vale para a data da solicitação, em horário de São Paulo; só a série mensal de pagos usa a data do pagamento). O bloco **Por atleta** aparece só para gestão e admin.
+- **Pagamento em lote:** a gestão seleciona reembolsos aprovados, informa a data do pagamento e confirma. É tudo ou nada: se um pedido do lote não puder ser pago, nenhum é pago. Ninguém paga o próprio reembolso.
+- **Patrocinador:** o admin atribui a função na aba **Usuários**; a pessoa pode ser também atleta. Ela vê só o dashboard, com totais, sem nome de atleta nem descrição dos pedidos. No banco o patrocinador pode ler o calendário de provas (informação da equipe, não dado pessoal); na tela a aba Calendário só aparece se ele também for atleta.
+
 ## Níveis de acesso
 - **Atleta:** vê o calendário, atualiza o nome, solicita renovações e reembolsos e acompanha as decisões.
 - **Gestão:** tudo do atleta, mais cadastrar provas, ver os atletas e validar renovações e reembolsos.
 - **Admin:** tudo da gestão, mais a aba **Usuários**, onde atribui a função de cada pessoa cadastrada. O banco impede que alguém mude a própria função sem ser admin e que o último admin seja rebaixado; cada mudança fica registrada.
+- **Patrocinador:** vê apenas o dashboard financeiro (totais, sem nomes nem descrições); no banco pode ler o calendário de provas (informação da equipe, não dado pessoal), mas na tela a aba Calendário só aparece se ele também for atleta. Não lê reembolsos, renovações nem perfis de outras pessoas. Pode ser também atleta.
 - O primeiro admin é definido pelo SQL Editor (passo "Primeira gestão", agora com `'admin'`). Depois disso, as demais funções são dadas pela aba Usuários.
 
 ## Validação pela gestão
