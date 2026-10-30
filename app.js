@@ -3,7 +3,7 @@ var ENTRADA = /type=invite/.test(HASH) ? 'invite' : /type=signup/.test(HASH) ? '
 var ERRO = /error(_code|_description)?=/.test(HASH);
 var PART = [], sb, me = null, prof = null, admin = false, sup = false, sim = '', realAdmin = false, realSup = false, eAtl = false, USR = [], P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', editId = '', SEN = [], loginMsg = '', IMP = {rows: [], erros: [], res: [], busy: false}, recovery = false, invite = (ENTRADA === 'invite'), aviso = '';
 var SEL = {}, LOTE_DATA = '';
-var DASH = null, dashPer = 'mes', DASH_LOADING = false, spons = false;
+var DASH = null, dashPer = 'mes', DASH_LOADING = false, DASH_ERRO = false, DASH_SEQ = 0, spons = false;
 var AV = [], HR = [], previa = null, editRb = '', rbRasc = null;
 var MES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 function dig(t){ return String(t == null ? '' : t).replace(/\D/g, ''); }
@@ -237,7 +237,7 @@ function mesRotulo(m){ var p = String(m).split('-'); return (MES[Number(p[1]) - 
 function barrasMesDash(d){
   var ms = (d && d.meses) || [], mx = 0;
   ms.forEach(function(x){ mx = Math.max(mx, Number(x.solicitado) || 0, Number(x.pago) || 0); });
-  function w(v){ return mx > 0 ? Math.round((Number(v) || 0) / mx * 1000) / 10 : 0; }
+  function w(v){ v = Number(v) || 0; return mx > 0 && v > 0 ? Math.max(1, Math.round(v / mx * 1000) / 10) : 0; }
   if (!ms.length) return '';
   return '<h3>Por mês</h3><p class="leg"><i class="sw s"></i> Solicitado <i class="sw p"></i> Pago</p>' + ms.map(function(x){
     return '<div class="dmes"><b>' + esc(mesRotulo(x.mes)) + '</b><div class="bar"><span class="s" style="width:' + w(x.solicitado) + '%"></span></div><small>' + money(x.solicitado) + '</small><div class="bar"><span class="p" style="width:' + w(x.pago) + '%"></span></div><small>' + money(x.pago) + '</small></div>';
@@ -264,6 +264,13 @@ function dashVazio(d){
   var s = (d && d.situacoes) || {};
   return !Object.keys(s).some(function(k){ return Number(s[k] && s[k].qtd) > 0; });
 }
+function dashEstado(o){
+  if (o.loading) return 'carregando';
+  if (o.erro) return 'erro';
+  if (o.dash == null) return 'carregando';
+  return dashVazio(o.dash) ? 'vazio' : 'ok';
+}
+function dashReset(){ DASH = null; DASH_ERRO = false; DASH_LOADING = false; DASH_SEQ++; }
 function montarAbas(o){
   var ab;
   if (o.admin) {
@@ -590,16 +597,21 @@ function viewReb(){
 
 function viewDash(){
   var h = '<h2>Dashboard</h2><label class="dper">Período<select id="dashper">' + [['mes', 'Mês atual'], ['3m', 'Últimos 3 meses'], ['ano', 'Ano'], ['tudo', 'Tudo']].map(function(x){ return '<option value="' + x[0] + '"' + (x[0] == dashPer ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></label>';
-  if (DASH === null) return h + '<p class="empty">Carregando…</p>';
-  if (dashVazio(DASH)) return h + '<p class="empty">Sem dados no período.</p>';
+  var est = dashEstado({dash: DASH, loading: DASH_LOADING, erro: DASH_ERRO});
+  if (est == 'carregando') return h + '<p class="empty">Carregando…</p>';
+  if (est == 'erro') return h + '<p class="empty">Não foi possível carregar o dashboard. Tente de novo.</p><button class="btn s g" data-dashretry="1">Tentar de novo</button>';
+  if (est == 'vazio') return h + '<p class="empty">Sem dados no período.</p>';
   return h + cartoesDash(DASH) + barrasMesDash(DASH) + rankingProvaDash(DASH) + tempoMedioDash(DASH) + atletasDash(DASH);
 }
 async function carregarDash(){
-  DASH_LOADING = true;
-  var p = periodoDash(dashPer, today());
-  var r = await sb.rpc('dashboard_reembolsos', {p_de: p.de, p_ate: p.ate});
+  var seq = ++DASH_SEQ, p = periodoDash(dashPer, today());
+  DASH_LOADING = true; DASH_ERRO = false;
+  var r;
+  try { r = await sb.rpc('dashboard_reembolsos', {p_de: p.de, p_ate: p.ate}); }
+  catch (x) { r = {error: x}; }
+  if (seq !== DASH_SEQ) return;  // resposta de um pedido já substituído
   DASH_LOADING = false;
-  if (r.error) return fail(r.error);
+  if (r.error) { DASH = null; DASH_ERRO = true; fail(r.error); render(); return; }
   DASH = r.data; render();
 }
 
@@ -641,7 +653,7 @@ function render(){
   $('#role').textContent = (sim ? 'Simulando a visão de ' + (sim === 'gestao' ? 'gestão' : 'atleta') : realSup ? 'Acesso de administrador' : realAdmin ? 'Acesso de gestão' : 'Acesso de atleta') + (prof.nome ? ' · ' + prof.nome : '');
   $('#out').hidden = false; $('#sim').hidden = !realSup; $('#sim').value = sim;
   $('#app').innerHTML = (sim ? '<div class="al" role="status">Modo simulação: você está vendo a tela de ' + (sim === 'gestao' ? 'gestão' : 'atleta') + ', somente leitura.</div>' : '') + (aviso ? '<div class="al" role="status" style="border-color:#0B7A64">' + esc(aviso) + '</div>' : '') + ({cal: viewCal, ath: viewAth, me: viewMine, ren: viewRen, reb: viewReb, usr: viewUsr, conta: viewConta, dash: viewDash, sen: viewSen, imp: viewImp, avi: viewAvisos})[tab]();
-  if (tab == 'dash' && DASH === null && !DASH_LOADING) carregarDash();
+  if (tab == 'dash' && DASH === null && !DASH_LOADING && !DASH_ERRO) carregarDash();
   if (tab == 'usr') initUsr();
   if (tab == 'imp') initImp();
   R = _R; REN = _REN;
@@ -718,14 +730,15 @@ document.addEventListener('change', function(e){
     render();
   }
   else if (t.id === 'lotedata') { LOTE_DATA = t.value; }
-  else if (t.id === 'dashper') { dashPer = t.value; carregarDash(); }
+  else if (t.id === 'dashper') { dashPer = t.value; dashReset(); render(); }
 });
 
 document.addEventListener('click', async function(e){
   var b = e.target.closest('button'); if (!b) return;
   if (b.dataset.am) { authMode = b.dataset.am; showAuth(); return; }
   if (b.id === 'out') { await sb.auth.signOut(); return; }
-  if (b.dataset.t) { tab = b.dataset.t; aviso = ''; SEL = {}; LOTE_DATA = ''; editId = ''; editRb = ''; previa = null; rbRasc = null; refresh(); return; }
+  if (b.dataset.dashretry) { dashReset(); render(); return; }
+  if (b.dataset.t) { if (b.dataset.t == 'dash') dashReset(); tab = b.dataset.t; aviso = ''; SEL = {}; LOTE_DATA = ''; editId = ''; editRb = ''; previa = null; rbRasc = null; refresh(); return; }
   if (b.dataset.rbno) { if (previa) rbRasc = {pid: previa.pid, descricao: previa.descricao, valor: previa.valor, arquivo: previa.arquivo}; else editRb = ''; previa = null; render(); return; }
   if (b.dataset.ed) { editId = b.dataset.ed; render(); window.scrollTo(0, 0); return; }
   if (b.dataset.edc) { editId = ''; render(); return; }
@@ -868,6 +881,7 @@ document.addEventListener('click', async function(e){
 
 /* ---------- Início ---------- */
 async function boot(){
+  dashReset();
   var s = await sb.auth.getSession();
   me = s.data.session ? s.data.session.user : null;
   if (HASH) { history.replaceState(null, '', location.pathname + location.search); HASH = ''; }

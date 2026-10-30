@@ -53,3 +53,26 @@ test('tempoMedioDash', () => {
   assert.match(c.tempoMedioDash({ tempo_medio_dias: null }), /—/);
   assert.match(c.tempoMedioDash({ tempo_medio_dias: 3.5 }), /3,5 dias/);
 });
+
+test('dashEstado', () => {
+  const c = load();
+  const vazio = { situacoes: sit({}) }, cheio = { situacoes: sit({ pago: { qtd: 1, valor: 1 } }) };
+  assert.strictEqual(c.dashEstado({ dash: null, loading: true, erro: false }), 'carregando');
+  assert.strictEqual(c.dashEstado({ dash: null, loading: false, erro: false }), 'carregando');
+  assert.strictEqual(c.dashEstado({ dash: null, loading: false, erro: true }), 'erro');
+  assert.strictEqual(c.dashEstado({ dash: vazio, loading: false, erro: false }), 'vazio');
+  assert.strictEqual(c.dashEstado({ dash: cheio, loading: false, erro: false }), 'ok');
+});
+test('viewDash em erro mostra botão de nova tentativa', () => {
+  const c = load();
+  c.DASH = null; c.DASH_ERRO = true;
+  const h = c.viewDash();
+  assert.match(h, /Não foi possível carregar o dashboard/); assert.match(h, /data-dashretry/);
+});
+test('barras: valor não nulo tem ao menos 1% de largura', () => {
+  const c = load();
+  const h = c.barrasMesDash({ meses: [{ mes: '2026-10', solicitado: 100000, pago: 1 }] });
+  assert.match(h, /class="p" style="width:1%"/); assert.match(h, /class="s" style="width:100%"/);
+  const z = c.barrasMesDash({ meses: [{ mes: '2026-10', solicitado: 5, pago: 0 }] });
+  assert.match(z, /class="p" style="width:0%"/);
+});
