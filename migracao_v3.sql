@@ -2,7 +2,9 @@
 -- Rode depois da migracao_v2.sql. Idempotente.
 
 -- V3.1) FUNÇÃO PATROCINADOR ---------------------------------------------------------------
--- Novo valor de papel: só enxerga o próprio perfil (nenhuma política existente o libera)
+-- Novo valor de papel. O patrocinador não ganha nenhuma permissão nova: não lê reembolsos,
+-- renovações, perfis de outras pessoas, históricos nem avisos alheios. Só lê o calendário
+-- não pessoal (provas e prova_distancias), que todo usuário ativo já lê.
 alter table public.perfis drop constraint if exists perfis_papel_check;
 alter table public.perfis add constraint perfis_papel_check
   check (papel in ('atleta', 'gestao', 'admin', 'patrocinador'));

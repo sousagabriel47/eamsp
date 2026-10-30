@@ -102,6 +102,77 @@ begin
   reset role;
 end $$;
 
+-- (g) patrocinador só lê o calendário (provas, prova_distancias), igual a todo usuário ativo
+insert into public.provas (id, nome, data) values
+  ('70000000-0000-4000-8000-0000000000c1', 'Prova Patrocínio', current_date + 30);
+insert into public.prova_distancias (id, prova_id, rotulo) values
+  ('70000000-0000-4000-8000-0000000000d1', '70000000-0000-4000-8000-0000000000c1', '10 km');
+insert into public.prova_participantes (prova_id, atleta_id, distancia_id) values
+  ('70000000-0000-4000-8000-0000000000c1', '70000000-0000-4000-8000-000000000003', '70000000-0000-4000-8000-0000000000d1');
+insert into public.avisos (usuario_id, tipo, texto) values
+  ('70000000-0000-4000-8000-000000000003', 'teste', 'aviso de outro');
+insert into public.reembolso_historico (reembolso_id, status_anterior, status_novo) values
+  ('70000000-0000-4000-8000-0000000000a1', 'pendente', 'aprovado');
+insert into public.renovacao_emissao_historico (renovacao_id, anterior, novo) values
+  ('70000000-0000-4000-8000-0000000000b1', null, current_date);
+do $$
+declare n int;
+begin
+  assert (select count(*) from public.provas) >= 1, 'g0';
+  perform set_config('request.jwt.claim.sub', '70000000-0000-4000-8000-000000000004', true);
+  set local role authenticated;
+  assert (select count(*) from public.provas where id = '70000000-0000-4000-8000-0000000000c1') = 1, 'g1';
+  assert (select count(*) from public.prova_distancias where prova_id = '70000000-0000-4000-8000-0000000000c1') = 1, 'g2';
+  assert (select count(*) from public.reembolso_historico) = 0, 'g3';
+  assert (select count(*) from public.avisos) = 0, 'g4';
+  assert (select count(*) from public.renovacao_emissao_historico) = 0, 'g5';
+  assert (select count(*) from public.prova_participantes) = 0, 'g6';
+  -- não altera o calendário
+  begin
+    insert into public.provas (nome, data) values ('invasora', current_date + 5);
+    assert false, 'g7: insert deveria falhar';
+  exception when insufficient_privilege then null;
+  end;
+  -- sem privilégio de tabela ou sem política: nada muda
+  begin
+    update public.provas set nome = 'hackeada' where id = '70000000-0000-4000-8000-0000000000c1';
+    get diagnostics n = row_count;
+    assert n = 0, 'g8: update afetou linhas';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from public.provas where id = '70000000-0000-4000-8000-0000000000c1';
+    get diagnostics n = row_count;
+    assert n = 0, 'g9: delete afetou linhas';
+  exception when insufficient_privilege then null;
+  end;
+  reset role;
+  assert (select nome from public.provas where id = '70000000-0000-4000-8000-0000000000c1') = 'Prova Patrocínio', 'g10';
+end $$;
+
+-- (h) alvo inexistente e papel igual ao atual (sem novo registro no histórico)
+do $$
+declare msg text; antes int;
+begin
+  perform set_config('request.jwt.claim.sub', '70000000-0000-4000-8000-000000000001', true);
+  set local role authenticated;
+  begin
+    perform public.definir_papel('70000000-0000-4000-8000-0000000000ff', 'patrocinador');
+    reset role;
+    assert false, 'h1: deveria falhar';
+  exception when raise_exception then
+    reset role;
+    get stacked diagnostics msg = message_text;
+    assert msg = 'Usuário não encontrado.', 'h1: ' || msg;
+  end;
+  select count(*) into antes from public.papel_historico where alvo = '70000000-0000-4000-8000-000000000004';
+  set local role authenticated;
+  perform public.definir_papel('70000000-0000-4000-8000-000000000004', 'patrocinador');
+  reset role;
+  assert (select count(*) from public.papel_historico where alvo = '70000000-0000-4000-8000-000000000004') = antes, 'h2';
+  assert (select papel from public.perfis where id = '70000000-0000-4000-8000-000000000004') = 'patrocinador', 'h3';
+end $$;
+
 -- (f) último admin não pode ser rebaixado
 do $$
 declare msg text;
