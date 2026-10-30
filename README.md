@@ -22,15 +22,15 @@ Quem já tem o sistema instalado **não** roda o `schema.sql` de novo: abra o *S
 - **Renovações pela gestão:** a gestão informa a data de emissão e a de pagamento; mudanças na emissão ficam no histórico.
 
 ## Dashboard financeiro e pagamento em lote
-- **Dashboard financeiro:** cartões por situação (pendente, aprovado, pago, recusado), barras por mês, ranking por prova, tempo médio de decisão e filtro de período. O bloco **Por atleta** aparece só para gestão e admin.
+- **Dashboard financeiro:** cartões por situação (pendente, aprovado, pago, recusado), barras por mês, ranking por prova, tempo médio até o pagamento e filtro de período (o período vale para a data da solicitação, em horário de São Paulo; só a série mensal de pagos usa a data do pagamento). O bloco **Por atleta** aparece só para gestão e admin.
 - **Pagamento em lote:** a gestão seleciona reembolsos aprovados, informa a data do pagamento e confirma. É tudo ou nada: se um pedido do lote não puder ser pago, nenhum é pago. Ninguém paga o próprio reembolso.
-- **Patrocinador:** o admin atribui a função na aba **Usuários**; a pessoa pode ser também atleta. Ela vê só o dashboard, com totais, sem nome de atleta nem descrição dos pedidos, e lê o calendário de provas (informação da equipe, não dado pessoal).
+- **Patrocinador:** o admin atribui a função na aba **Usuários**; a pessoa pode ser também atleta. Ela vê só o dashboard, com totais, sem nome de atleta nem descrição dos pedidos, No banco o patrocinador pode ler o calendário de provas (informação da equipe, não dado pessoal); na tela a aba Calendário só aparece se ele também for atleta.
 
 ## Níveis de acesso
 - **Atleta:** vê o calendário, atualiza o nome, solicita renovações e reembolsos e acompanha as decisões.
 - **Gestão:** tudo do atleta, mais cadastrar provas, ver os atletas e validar renovações e reembolsos.
 - **Admin:** tudo da gestão, mais a aba **Usuários**, onde atribui a função de cada pessoa cadastrada. O banco impede que alguém mude a própria função sem ser admin e que o último admin seja rebaixado; cada mudança fica registrada.
-- **Patrocinador:** vê apenas o dashboard financeiro (totais, sem nomes nem descrições) e o calendário de provas. Não lê reembolsos, renovações nem perfis de outras pessoas. Pode ser também atleta.
+- **Patrocinador:** vê apenas o dashboard financeiro (totais, sem nomes nem descrições); no banco pode ler o calendário de provas (informação da equipe, não dado pessoal), mas na tela a aba Calendário só aparece se ele também for atleta. Não lê reembolsos, renovações nem perfis de outras pessoas. Pode ser também atleta.
 - O primeiro admin é definido pelo SQL Editor (passo "Primeira gestão", agora com `'admin'`). Depois disso, as demais funções são dadas pela aba Usuários.
 
 ## Validação pela gestão
