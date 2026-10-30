@@ -205,6 +205,9 @@ function showAuth(){
 }
 
 /* ---------- Funções puras ---------- */
+// consulta de reembolsos: nomeia a ligação com perfis (reembolsos_atleta_id_fkey) para a API do Supabase
+// nunca ficar em dúvida entre duas ligações (erro "more than one relationship was found")
+var SEL_REEMBOLSOS = '*, perfis!reembolsos_atleta_id_fkey(nome), provas(nome)';
 // Pagamento em lote: só aprovado de outro atleta pode ser selecionado.
 function lotePodeSelecionar(r, meId){return !!r && r.status === 'aprovado' && r.atleta_id !== meId}
 function loteResumo(sel, rs, meId){
@@ -662,7 +665,7 @@ async function refresh(){
   var q = consultasUsuario({spons: spons, atleta: !!prof.atleta}), vazio = Promise.resolve({data: []});
   var a = await Promise.all([
     q.dados ? sb.from('provas').select('*, prova_distancias(id,rotulo,ordem)').order('data') : vazio,
-    q.dados ? sb.from('reembolsos').select('*, perfis(nome), provas(nome)').order('criado_em', {ascending: false}) : vazio,
+    q.dados ? sb.from('reembolsos').select(SEL_REEMBOLSOS).order('criado_em', {ascending: false}) : vazio,
     admin ? sb.from('perfis').select('*').eq('atleta', true) : Promise.resolve({data: []}),
     q.dados ? sb.from('reembolso_historico').select('*').order('alterado_em') : vazio,
     q.dados ? sb.from('renovacoes').select('*, perfis(nome)').order('criado_em', {ascending: false}) : vazio,
