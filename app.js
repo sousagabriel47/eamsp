@@ -3,6 +3,7 @@ var ENTRADA = /type=invite/.test(HASH) ? 'invite' : /type=signup/.test(HASH) ? '
 var ERRO = /error(_code|_description)?=/.test(HASH);
 var PART = [], sb, me = null, prof = null, admin = false, sup = false, sim = '', realAdmin = false, realSup = false, eAtl = false, USR = [], P = [], ATL = [], R = [], REN = [], tab = 'cal', authMode = 'in', editId = '', SEN = [], loginMsg = '', IMP = {rows: [], erros: [], res: [], busy: false}, recovery = false, invite = (ENTRADA === 'invite'), aviso = '';
 var SEL = {}, LOTE_DATA = '';
+var DASH = null, dashPer = 'mes', DASH_LOADING = false, spons = false;
 var AV = [], HR = [], previa = null, editRb = '', rbRasc = null;
 var MES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 function dig(t){ return String(t == null ? '' : t).replace(/\D/g, ''); }
@@ -214,6 +215,65 @@ function loteResumo(sel, rs, meId){
 function loteBarraHtml(resumo, data){
   if (!resumo || !resumo.n) return '';
   return '<div class="lotebar"><b>' + resumo.n + (resumo.n === 1 ? ' selecionado' : ' selecionados') + ' · ' + money(resumo.total) + '</b><label>Data do pagamento<input type="date" id="lotedata" max="' + today() + '" value="' + esc(data) + '"></label><div class="acts"><button class="btn s g" data-lote="1">Marcar como pagos</button><button class="btn s x" data-lotelimpa="1">Limpar seleção</button></div></div>';
+}
+// Dashboard financeiro de reembolsos.
+function periodoDash(chave, hoje){
+  var a = Number(hoje.slice(0, 4)), m = Number(hoje.slice(5, 7));
+  function ym(y, mm){ return y + '-' + ('0' + mm).slice(-2) + '-01'; }
+  if (chave == 'mes') return {de: ym(a, m), ate: hoje};
+  if (chave == '3m') { m -= 2; if (m < 1) { m += 12; a--; } return {de: ym(a, m), ate: hoje}; }
+  if (chave == 'ano') return {de: a + '-01-01', ate: hoje};
+  return {de: null, ate: null};
+}
+var DASH_SIT = [['pendente', 'Pendente'], ['aprovado', 'A pagar'], ['pago', 'Pago'], ['recusado', 'Recusado']];
+function cartoesDash(d){
+  var s = (d && d.situacoes) || {};
+  return '<div class="dgrid">' + DASH_SIT.map(function(x){
+    var v = s[x[0]] || {qtd: 0, valor: 0};
+    return '<div class="dcard' + (x[0] == 'aprovado' ? ' hi' : '') + '"><small>' + x[1] + '</small><b>' + money(v.valor) + '</b><span>' + Number(v.qtd) + (Number(v.qtd) == 1 ? ' pedido' : ' pedidos') + '</span></div>';
+  }).join('') + '</div>';
+}
+function mesRotulo(m){ var p = String(m).split('-'); return (MES[Number(p[1]) - 1] || p[1]).slice(0, 3) + '/' + p[0]; }
+function barrasMesDash(d){
+  var ms = (d && d.meses) || [], mx = 0;
+  ms.forEach(function(x){ mx = Math.max(mx, Number(x.solicitado) || 0, Number(x.pago) || 0); });
+  function w(v){ return mx > 0 ? Math.round((Number(v) || 0) / mx * 1000) / 10 : 0; }
+  if (!ms.length) return '';
+  return '<h3>Por mês</h3><p class="leg"><i class="sw s"></i> Solicitado <i class="sw p"></i> Pago</p>' + ms.map(function(x){
+    return '<div class="dmes"><b>' + esc(mesRotulo(x.mes)) + '</b><div class="bar"><span class="s" style="width:' + w(x.solicitado) + '%"></span></div><small>' + money(x.solicitado) + '</small><div class="bar"><span class="p" style="width:' + w(x.pago) + '%"></span></div><small>' + money(x.pago) + '</small></div>';
+  }).join('');
+}
+function rankingProvaDash(d){
+  var ps = (d && d.provas) || [];
+  if (!ps.length) return '';
+  return '<h3>Por prova</h3>' + ps.map(function(x){
+    return '<div class="item"><div class="info"><b>' + esc(x.prova || 'Sem prova') + '</b><small>' + Number(x.qtd) + (Number(x.qtd) == 1 ? ' pedido' : ' pedidos') + '</small></div><b>' + money(x.valor) + '</b></div>';
+  }).join('');
+}
+function tempoMedioDash(d){
+  var t = d && d.tempo_medio_dias;
+  return '<p class="sum">Tempo médio até o pagamento: ' + (t == null ? '—' : String(Math.round(Number(t) * 10) / 10).replace('.', ',') + ' dias') + '</p>';
+}
+function atletasDash(d){
+  if (!d || !d.atletas) return '';
+  return '<h3>Por atleta</h3>' + (d.atletas.length ? d.atletas.map(function(x){
+    return '<div class="item"><div class="info"><b>' + esc(x.nome || 'Sem nome') + '</b><small>Pediu ' + money(x.pediu) + ' · Recebeu ' + money(x.recebeu) + ' · A receber ' + money(x.a_receber) + '</small></div></div>';
+  }).join('') : '<p class="empty">Nenhum atleta no período.</p>');
+}
+function dashVazio(d){
+  var s = (d && d.situacoes) || {};
+  return !Object.keys(s).some(function(k){ return Number(s[k] && s[k].qtd) > 0; });
+}
+function montarAbas(o){
+  var ab;
+  if (o.admin) {
+    ab = [['cal', 'Calendário'], ['ath', 'Atletas'], ['ren', 'Renovações' + (o.np ? ' (' + o.np + ')' : '')], ['reb', 'Reembolsos' + (o.nr ? ' (' + o.nr + ')' : '')], ['dash', 'Dashboard']]
+      .concat(o.eAtl ? [['me', 'Atestado e anuidade']] : [])
+      .concat(o.sup ? [['usr', 'Usuários'], ['sen', 'Senhas' + (o.ns ? ' (' + o.ns + ')' : '')], ['imp', 'Importar CSV']] : []);
+  } else if (o.spons) {
+    ab = [['dash', 'Dashboard']].concat(o.eAtl ? [['cal', 'Calendário'], ['me', 'Atestado e anuidade'], ['reb', 'Reembolsos']] : []);
+  } else ab = [['cal', 'Calendário'], ['me', 'Atestado e anuidade'], ['reb', 'Reembolsos']];
+  return ab.concat([['conta', 'Minha conta']]);
 }
 // Avisos calculados na hora (vencimentos e pendências). 'texto' já é HTML seguro (nomes escapados).
 function avisosCalculados(o){
@@ -528,6 +588,21 @@ function viewReb(){
   return h;
 }
 
+function viewDash(){
+  var h = '<h2>Dashboard</h2><label class="dper">Período<select id="dashper">' + [['mes', 'Mês atual'], ['3m', 'Últimos 3 meses'], ['ano', 'Ano'], ['tudo', 'Tudo']].map(function(x){ return '<option value="' + x[0] + '"' + (x[0] == dashPer ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></label>';
+  if (DASH === null) return h + '<p class="empty">Carregando…</p>';
+  if (dashVazio(DASH)) return h + '<p class="empty">Sem dados no período.</p>';
+  return h + cartoesDash(DASH) + barrasMesDash(DASH) + rankingProvaDash(DASH) + tempoMedioDash(DASH) + atletasDash(DASH);
+}
+async function carregarDash(){
+  DASH_LOADING = true;
+  var p = periodoDash(dashPer, today());
+  var r = await sb.rpc('dashboard_reembolsos', {p_de: p.de, p_ate: p.ate});
+  DASH_LOADING = false;
+  if (r.error) return fail(r.error);
+  DASH = r.data; render();
+}
+
 /* ---------- Dados ---------- */
 async function refresh(){
   var pr = await sb.from('perfis').select('*').eq('id', me.id).single();
@@ -559,13 +634,14 @@ function render(){
   }
   var np = REN.filter(function(x){return x.status == 'pendente'}).length, nr = R.filter(function(x){return x.status == 'pendente'}).length;
   var ns = SEN.filter(function(x){return x.status == 'pendente'}).length;
-  var tabs = (admin ? [['cal','Calendário'],['ath','Atletas'],['ren','Renovações' + (np ? ' (' + np + ')' : '')],['reb','Reembolsos' + (nr ? ' (' + nr + ')' : '')]].concat(eAtl ? [['me','Atestado e anuidade']] : []).concat(sup ? [['usr','Usuários'],['sen','Senhas' + (ns ? ' (' + ns + ')' : '')],['imp','Importar CSV']] : []) : [['cal','Calendário'],['me','Atestado e anuidade'],['reb','Reembolsos']]).concat([['conta','Minha conta']]);
-  if (tab != 'avi' && !tabs.some(function(t){return t[0] == tab})) tab = 'cal';
+  var tabs = montarAbas({admin: admin, sup: sup, spons: spons, eAtl: eAtl, np: np, nr: nr, ns: ns});
+  if (tab != 'avi' && !tabs.some(function(t){return t[0] == tab})) tab = tabs[0][0];
   var na = totalAvisos(); $('#sino').hidden = false; $('#sino').textContent = 'Avisos (' + na + ')';
   $('#nav').innerHTML = tabs.map(function(t){return '<button data-t="' + t[0] + '"' + (t[0] == tab ? ' class="on"' : '') + '>' + t[1] + '</button>'}).join('');
   $('#role').textContent = (sim ? 'Simulando a visão de ' + (sim === 'gestao' ? 'gestão' : 'atleta') : realSup ? 'Acesso de administrador' : realAdmin ? 'Acesso de gestão' : 'Acesso de atleta') + (prof.nome ? ' · ' + prof.nome : '');
   $('#out').hidden = false; $('#sim').hidden = !realSup; $('#sim').value = sim;
-  $('#app').innerHTML = (sim ? '<div class="al" role="status">Modo simulação: você está vendo a tela de ' + (sim === 'gestao' ? 'gestão' : 'atleta') + ', somente leitura.</div>' : '') + (aviso ? '<div class="al" role="status" style="border-color:#0B7A64">' + esc(aviso) + '</div>' : '') + ({cal: viewCal, ath: viewAth, me: viewMine, ren: viewRen, reb: viewReb, usr: viewUsr, conta: viewConta, sen: viewSen, imp: viewImp, avi: viewAvisos})[tab]();
+  $('#app').innerHTML = (sim ? '<div class="al" role="status">Modo simulação: você está vendo a tela de ' + (sim === 'gestao' ? 'gestão' : 'atleta') + ', somente leitura.</div>' : '') + (aviso ? '<div class="al" role="status" style="border-color:#0B7A64">' + esc(aviso) + '</div>' : '') + ({cal: viewCal, ath: viewAth, me: viewMine, ren: viewRen, reb: viewReb, usr: viewUsr, conta: viewConta, dash: viewDash, sen: viewSen, imp: viewImp, avi: viewAvisos})[tab]();
+  if (tab == 'dash' && DASH === null && !DASH_LOADING) carregarDash();
   if (tab == 'usr') initUsr();
   if (tab == 'imp') initImp();
   R = _R; REN = _REN;
@@ -642,6 +718,7 @@ document.addEventListener('change', function(e){
     render();
   }
   else if (t.id === 'lotedata') { LOTE_DATA = t.value; }
+  else if (t.id === 'dashper') { dashPer = t.value; carregarDash(); }
 });
 
 document.addEventListener('click', async function(e){
