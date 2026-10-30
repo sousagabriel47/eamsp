@@ -898,7 +898,7 @@ document.addEventListener('click', async function(e){
 
 /* ---------- Início ---------- */
 async function boot(){
-  dashReset();
+  dashReset(); SEL = {}; LOTE_DATA = '';
   var s = await sb.auth.getSession();
   me = s.data.session ? s.data.session.user : null;
   if (HASH) { history.replaceState(null, '', location.pathname + location.search); HASH = ''; }
@@ -934,7 +934,7 @@ initTema();
     $('#app').innerHTML = '<p class="empty">Falta configurar o sistema: abra o arquivo config.js e cole a URL e a chave pública do seu projeto Supabase.</p>'; return;
   }
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  $('#sim').onchange = function(){ sim = this.value; render(); };
+  $('#sim').onchange = function(){ sim = this.value; dashReset(); render(); };
   sb.auth.onAuthStateChange(function(ev, s){
     if (ev === 'PASSWORD_RECOVERY') recovery = true;
     if (['INITIAL_SESSION', 'SIGNED_IN', 'SIGNED_OUT', 'PASSWORD_RECOVERY'].indexOf(ev) < 0) return;

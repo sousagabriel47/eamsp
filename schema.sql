@@ -1320,6 +1320,13 @@ begin
       new.pago_por := coalesce(new.pago_por, (select auth.uid()));
     end if;
   end if;
+  -- sem virar "pago", pago_em/pago_por nunca mudam via API (defesa contra valores forjados);
+  -- a migração e o SQL Editor (papel diferente de authenticated/anon) continuam podendo corrigir dados
+  if current_setting('role') in ('authenticated', 'anon')
+     and not (new.status = 'pago' and old.status is distinct from 'pago') then
+    new.pago_em  := old.pago_em;
+    new.pago_por := old.pago_por;
+  end if;
   -- a prova apagada zera prova_id pela FK (on delete set null): isso não é edição do pedido
   if not reenvio and ((new.prova_id is distinct from old.prova_id
                        and not (new.prova_id is null
@@ -1339,6 +1346,23 @@ begin
   return new;
 end;
 $$;
+
+-- pagamento nunca vem do cliente: zera pago_em/pago_por no INSERT via API (gatilho próprio da v3,
+-- para não depender de definir_valor_prova, que a migracao_v2.sql recria)
+create or replace function public.zerar_pagamento_reembolso() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if current_setting('role') in ('authenticated', 'anon') then
+    new.pago_em := null;
+    new.pago_por := null;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists antes_inserir_reembolso_v3 on public.reembolsos;
+create trigger antes_inserir_reembolso_v3 before insert on public.reembolsos
+  for each row execute function public.zerar_pagamento_reembolso();
 
 create or replace function public.pagar_reembolsos(p_ids uuid[], p_data date) returns integer
 language plpgsql security definer set search_path = ''
@@ -1370,6 +1394,10 @@ begin
   end if;
   if exists (select 1 from public.reembolsos r where r.id = any (ids) and r.atleta_id = uid) then
     raise exception 'Você não pode pagar o seu próprio reembolso. Peça a outro gestor.';
+  end if;
+  if exists (select 1 from public.reembolsos r where r.id = any (ids)
+                and p_data < (r.criado_em at time zone 'America/Sao_Paulo')::date) then
+    raise exception 'A data do pagamento não pode ser anterior à data da solicitação.';
   end if;
   update public.reembolsos set status = 'pago', pago_em = p_data, pago_por = uid
    where id = any (ids);

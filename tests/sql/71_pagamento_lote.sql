@@ -26,6 +26,9 @@ insert into public.reembolsos (id, atleta_id, descricao, valor, status) values
   ('71a00000-0000-4000-8000-000000000006', '71000000-0000-4000-8000-000000000004', 'x', 60, 'aprovado'),
   ('71a00000-0000-4000-8000-000000000007', '71000000-0000-4000-8000-000000000003', 'x', 70, 'aprovado');
 
+update public.reembolsos set criado_em = timestamptz '2026-01-01 12:00:00+00'
+  where id::text like '71a00000-%';
+
 -- (a) lote com 3 aprovados de 2 atletas
 do $$
 declare n int;
