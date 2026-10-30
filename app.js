@@ -386,6 +386,28 @@ function listaTendaHtml(p, parts){
   return h + '<script>window.onload=function(){window.print()}<\/script></body></html>';
 }
 
+// degradê nas bordas da barra de abas: max = quanto dá para rolar; x = posição atual
+function navFadeClasses(max, x){
+  var rola = max > 2;
+  return {fl: rola && x > 2, fr: rola && x < max - 2};
+}
+// posição de rolagem que centraliza a aba ativa (esq/larg da aba, larg do nav, largura total do conteúdo)
+function navCentro(esq, larg, navLarg, total){
+  var max = Math.max(0, total - navLarg);
+  return Math.min(max, Math.max(0, esq - (navLarg - larg) / 2));
+}
+function navFade(){
+  var n = $('#nav'); if (!n) return;
+  var c = navFadeClasses(n.scrollWidth - n.clientWidth, n.scrollLeft);
+  n.classList.toggle('fl', c.fl); n.classList.toggle('fr', c.fr);
+}
+function navAjusta(){
+  var n = $('#nav'); if (!n) return;
+  var on = n.querySelector('button.on');
+  if (on && n.scrollWidth > n.clientWidth) n.scrollLeft = navCentro(on.offsetLeft, on.offsetWidth, n.clientWidth, n.scrollWidth);
+  navFade();
+}
+
 /* ---------- Telas ---------- */
 function reembProva(p){
   if (!admin) return '';
@@ -427,7 +449,7 @@ function provaDist(p){
 }
 function viewCal(){
   var h = '<h2>Calendário de provas</h2>';
-  if (admin) h += '<form id="f"><label>Prova<input name="n" required></label><label>Data<input type="date" name="d" required></label><label>Local<input name="l"></label><label>Distâncias (separadas por vírgula)<input name="k" placeholder="5 km, 10 km"></label><label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="lp" style="width:auto"> Tem lista de presença</label><label>Inscrição até<input type="date" name="i"></label><label>Valor da inscrição (R$)<input type="number" name="v" step="0.01" min="0"></label><label>Link de inscrição<input type="url" name="u" placeholder="https://..." pattern="https?://.+"></label><button class="btn">Adicionar prova</button></form>';
+  if (admin) h += '<form id="f"><label>Prova<input name="n" required></label><label>Data<input type="date" name="d" required></label><label>Local<input name="l"></label><label>Distâncias (separadas por vírgula)<input name="k" placeholder="5 km, 10 km"></label><label class="chk"><input type="checkbox" name="lp"> Tem lista de presença</label><label>Inscrição até<input type="date" name="i"></label><label>Valor da inscrição (R$)<input type="number" name="v" step="0.01" min="0"></label><label>Link de inscrição<input type="url" name="u" placeholder="https://..." pattern="https?://.+"></label><button class="btn">Adicionar prova</button></form>';
   var m = '';
   if (!P.length) h += '<p class="empty">Nenhuma prova cadastrada' + (admin ? '. Adicione a primeira acima.' : ' ainda.') + '</p>';
   P.forEach(function(p){
@@ -667,6 +689,7 @@ function render(){
   if ((tab != 'avi' || (spons && !eAtl)) && !tabs.some(function(t){return t[0] == tab})) tab = tabs[0][0];
   var na = totalAvisos(); $('#sino').hidden = spons && !eAtl; $('#sino').textContent = 'Avisos (' + na + ')';
   $('#nav').innerHTML = tabs.map(function(t){return '<button data-t="' + t[0] + '"' + (t[0] == tab ? ' class="on"' : '') + '>' + t[1] + '</button>'}).join('');
+  navAjusta();
   $('#role').textContent = rotuloAcesso({sim: sim, realSup: realSup, realAdmin: realAdmin, spons: spons}) + (prof.nome ? ' · ' + prof.nome : '');
   $('#out').hidden = false; $('#sim').hidden = !realSup; $('#sim').value = sim;
   $('#app').innerHTML = (sim ? '<div class="al" role="status">Modo simulação: você está vendo a tela de ' + (sim === 'gestao' ? 'gestão' : sim === 'patrocinador' ? 'patrocinador' : 'atleta') + ', somente leitura.</div>' : '') + (aviso ? '<div class="al" role="status" style="border-color:#0B7A64">' + esc(aviso) + '</div>' : '') + ({cal: viewCal, ath: viewAth, me: viewMine, ren: viewRen, reb: viewReb, usr: viewUsr, conta: viewConta, dash: viewDash, sen: viewSen, imp: viewImp, avi: viewAvisos})[tab]();
@@ -934,6 +957,7 @@ initTema();
     $('#app').innerHTML = '<p class="empty">Falta configurar o sistema: abra o arquivo config.js e cole a URL e a chave pública do seu projeto Supabase.</p>'; return;
   }
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  $('#nav').addEventListener('scroll', navFade); window.addEventListener('resize', navFade);
   $('#sim').onchange = function(){ sim = this.value; dashReset(); render(); };
   sb.auth.onAuthStateChange(function(ev, s){
     if (ev === 'PASSWORD_RECOVERY') recovery = true;
