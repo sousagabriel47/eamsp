@@ -18,6 +18,7 @@ Quem já tem o sistema instalado **não** roda o `schema.sql` de novo: abra o *S
 ## Funções da versão 2
 - **Reembolso:** o valor da inscrição é preenchido a partir da prova escolhida; antes de enviar há uma prévia do pedido; se for recusado, o atleta corrige e reenvia o mesmo pedido, e o histórico de tentativas fica guardado.
 - **Calendário:** cada prova pode ter várias distâncias. O atleta marca "Vou correr" (só em prova futura, com distância da própria prova) e a gestão tem a lista da tenda, pronta para imprimir.
+- **Pedidos de reembolso por prova:** em cada prova do calendário, o atleta vê quantas pessoas já pediram reembolso dela (só a contagem: sem nomes, valores nem descrições; cada pessoa conta uma vez e pedidos cancelados não contam). A gestão continua vendo o detalhe. A contagem vem da função `pedidos_reembolso_por_prova` (seção V3.4 da `migracao_v3.sql`): **rode a `migracao_v3.sql` de novo** para ativá-la; sem ela o site funciona normalmente, só não mostra o número.
 - **Avisos dentro do sistema:** um sino mostra pendências e novidades (por exemplo, decisão sobre renovação ou reembolso). **Avisos por e-mail ainda não existem.**
 - **Renovações pela gestão:** a gestão informa a data de emissão e a de pagamento; mudanças na emissão ficam no histórico.
 

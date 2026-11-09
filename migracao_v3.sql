@@ -286,5 +286,27 @@ $$;
 revoke execute on function public.dashboard_reembolsos(date, date) from public, anon;
 grant execute on function public.dashboard_reembolsos(date, date) to authenticated;
 
+-- V3.4) PEDIDOS DE REEMBOLSO POR PROVA (para o atleta) ------------------------------------
+-- O atleta não lê os reembolsos dos outros. Esta função devolve SÓ a quantidade de pessoas que já
+-- pediram reembolso de cada prova (sem nomes, valores nem descrições). Conta cada pessoa uma vez,
+-- mesmo com vários pedidos, e ignora pedidos cancelados e pedidos sem prova. Só aparecem provas com
+-- ao menos um pedido. Permitido a atleta e gestão ativos.
+create or replace function public.pedidos_reembolso_por_prova() returns table (prova_id uuid, pessoas integer)
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not (public.is_atleta() or public.is_gestao()) then
+    raise exception 'Sem permissão para ver os pedidos de reembolso por prova.';
+  end if;
+  return query
+    select r.prova_id, count(distinct r.atleta_id)::integer
+      from public.reembolsos r
+     where r.prova_id is not null and r.status <> 'cancelado'
+     group by r.prova_id;
+end;
+$$;
+revoke execute on function public.pedidos_reembolso_por_prova() from public, anon;
+grant execute on function public.pedidos_reembolso_por_prova() to authenticated;
+
 -- faz a API do Supabase reconhecer as novas funções/colunas sem esperar o cache
 notify pgrst, 'reload schema';
