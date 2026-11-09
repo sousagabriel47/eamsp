@@ -5,6 +5,7 @@ var PART = [], sb, me = null, prof = null, admin = false, sup = false, sim = '',
 var SEL = {}, LOTE_DATA = '';
 var DASH = null, dashPer = 'mes', DASH_LOADING = false, DASH_ERRO = false, DASH_SEQ = 0, spons = false;
 var AV = [], HR = [], previa = null, editRb = '', rbRasc = null;
+var CONT_PROVA = null;   // prova_id -> quantas pessoas já pediram reembolso (null = ainda não carregado ou indisponível)
 var MES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 function dig(t){ return String(t == null ? '' : t).replace(/\D/g, ''); }
 function cpfValido(c){
@@ -205,6 +206,22 @@ function showAuth(){
 }
 
 /* ---------- Funções puras ---------- */
+// Pedidos de reembolso por prova, visto pelo atleta: só a quantidade de pessoas (sem nomes nem valores)
+function textoPedidosProva(n){
+  n = Number(n) || 0;
+  if (n === 0) return 'Ninguém pediu reembolso desta prova ainda.';
+  if (n === 1) return '1 pessoa já pediu reembolso desta prova.';
+  return n + ' pessoas já pediram reembolso desta prova.';
+}
+function contagemPorProva(linhas){
+  var m = {};
+  (linhas || []).forEach(function(x){ if (x && x.prova_id) m[x.prova_id] = Number(x.pessoas) || 0; });
+  return m;
+}
+function pedidosProvaHtml(mapa, provaId){
+  if (!mapa) return '';
+  return '<div style="flex-basis:100%"><small style="color:var(--mu)">' + esc(textoPedidosProva(mapa[provaId])) + '</small></div>';
+}
 // consulta de reembolsos: nomeia a ligação com perfis (reembolsos_atleta_id_fkey) para a API do Supabase
 // nunca ficar em dúvida entre duas ligações (erro "more than one relationship was found")
 var SEL_REEMBOLSOS = '*, perfis!reembolsos_atleta_id_fkey(nome), provas(nome)';
@@ -413,7 +430,7 @@ function navAjusta(){
 
 /* ---------- Telas ---------- */
 function reembProva(p){
-  if (!admin) return '';
+  if (!admin) return eAtl ? pedidosProvaHtml(CONT_PROVA, p.id) : '';
   var rs = R.filter(function(r){return r.prova_id === p.id});
   if (!rs.length) return '<div style="flex-basis:100%"><small style="color:var(--mu)">Nenhum reembolso solicitado para esta prova.</small></div>';
   var tot = 0, ids = {};
@@ -675,7 +692,13 @@ async function refresh(){
     q.dados ? sb.from('avisos').select('*').order('criado_em', {ascending: false}).limit(50) : vazio
   ]);
   for (var i = 0; i < a.length; i++) if (a[i].error) return fail(a[i].error);
-  P = a[0].data; R = a[1].data; ATL = a[2].data; HR = a[3].data; REN = a[4].data; USR = a[5].data; SEN = a[6].data; PART = a[7].data || []; AV = a[8].data || []; render();
+  P = a[0].data; R = a[1].data; ATL = a[2].data; HR = a[3].data; REN = a[4].data; USR = a[5].data; SEN = a[6].data; PART = a[7].data || []; AV = a[8].data || [];
+  // pedidos de reembolso por prova (o atleta vê só a contagem); se falhar (ex.: migração ainda não aplicada), a tela segue sem o número
+  CONT_PROVA = null;
+  if (q.dados && (prof.atleta || admin)) {
+    try { var rc = await sb.rpc('pedidos_reembolso_por_prova'); if (!rc.error) CONT_PROVA = contagemPorProva(rc.data); } catch (x) {}
+  }
+  render();
 }
 function render(){
   admin = realAdmin; sup = realSup; eAtl = !!prof.atleta; spons = prof.papel === 'patrocinador';
